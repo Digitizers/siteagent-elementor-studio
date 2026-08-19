@@ -201,7 +201,9 @@ padding: {
 - **Widgets** → `_css_classes` (leading underscore)
 - **Containers** → `css_classes` (no underscore)
 
-Write `_css_classes` on a container and it stores perfectly and produces no class in the markup — every shared-hover or shared-layout rule keyed to that class then does nothing. Verified both ways on Elementor 4.2: the same probe string renders from `_css_classes` on a heading and from `css_classes` on a container, and each is inert under the other's key.
+Write `_css_classes` on a container and it stores perfectly and produces no class in the markup — every shared-hover or shared-layout rule keyed to that class then does nothing. Verified both ways on Elementor 4.2: the same probe string renders from `_css_classes` on a classic heading widget and from `css_classes` on a classic container, and each is inert under the other's key.
+
+**Both keys are classic-element controls.** On **atomic** (v4) elements neither applies: atomic carries a typed `settings.classes` reference list whose every id must resolve to a local style definition or a Global Class (`files/references/atomic-v4.md`) — an arbitrary class name written there renders nothing at all.
 
 This is not an MCP defect — `get-container-schema` publishes `css_classes` correctly. It is what you get for assuming the widget key generalises. Read the container schema for the key rather than carrying one over.
 
@@ -250,7 +252,7 @@ A heading title accepts inline HTML, but it goes through WordPress's KSES filter
 
 and what survives is `background:linear-gradient(...)` plus `color:transparent` — a solid gradient block with invisible text inside it, which is a strange enough result that you'll blame the gradient rather than the filter.
 
-**Fix:** put the class in the title and the rule in `custom_css`, which is compiled server-side and never filtered:
+**Fix:** keep the class in the title and move the rule to a stylesheet KSES never touches. On **Pro**, that's per-element `custom_css`, which is compiled server-side and unfiltered:
 
 ```
 title:      Local currency at checkout, <span class="sp-grad">Global control</span> behind it
@@ -258,6 +260,8 @@ custom_css: selector .sp-grad{background:linear-gradient(96deg,#d24d00,#ff6601 4
               -webkit-background-clip:text;background-clip:text;
               -webkit-text-fill-color:transparent;color:transparent;}
 ```
+
+**On Free**, the same rule goes in **Appearance → Customize → Additional CSS** (core WordPress, unfiltered) or a child-theme stylesheet — scoped by the wrapper you can actually attach: `.sp-grad` inside the title survives KSES because it is a class attribute, not a style property, so `.sp-grad{…}` alone is usually enough; scope it with `.elementor-element-<id> .sp-grad` if the class name is reused elsewhere, remembering that the id changes if the element is rebuilt.
 
 The same trap applies to any inline style carrying a property outside the KSES list — check the rendered markup, not the stored setting.
 
