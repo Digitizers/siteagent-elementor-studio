@@ -500,7 +500,13 @@ What is *not* available on any tier is expressing it through the MCP's atomic pr
 
 Work down this list before concluding a write failed. Most "the tool didn't work" reports on this build were stale caches or bad screenshots.
 
-1. **Clear the element cache** — `wp eval "delete_post_meta( <id>, '_elementor_element_cache' );"` and reload. This alone explains a large share of "my change didn't apply".
+1. **Clear both caches** — the rendered-HTML meta *and* the compiled CSS, or a style change still shows stale and you'll misread a good write as a dropped property:
+
+   ```bash
+   wp eval "delete_post_meta( <id>, '_elementor_element_cache' ); \Elementor\Plugin::\$instance->files_manager->clear_cache();"
+   ```
+
+   Then reload (and warm once before screenshotting — see below). This alone explains a large share of "my change didn't apply".
 2. `get-page-structure({post_id})` — confirms what's nested in what
 3. `get-element-settings({element_id})` — shows the actual settings written to the DB
 4. `curl <site-url>` and grep for your custom classes — confirms the page is actually rendering your widgets
