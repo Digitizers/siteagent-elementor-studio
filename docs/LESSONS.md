@@ -472,7 +472,12 @@ delete_post_meta( $pid, '_elementor_element_cache' );
 
 **3. This walker patches `settings` — which on atomic (v4) pages is the wrong half for anything visual.** Atomic layout and appearance don't live in `settings`: they live in the element's **top-level `styles` map**, referenced from `settings.classes` (convention 8 and `files/references/atomic-v4.md`). Merge a padding or position change into an atomic element's `settings` and you get the whole silent-success chain — the walker matches the id, the save succeeds, both caches clear, and the page renders exactly as before.
 
-So scope the recipe: on **classic (v3)** elements it patches anything; on **atomic** elements use it only for **content** settings (a heading's `title`, a paragraph's text, a link URL). For atomic *styling* in bulk, patch the element's `styles` variant and make sure its id is present in `settings.classes` — or don't hand-patch at all and use `create-global-class` / `apply-global-class`, which is the supported path and survives element rebuilds.
+So scope the recipe: on **classic (v3)** elements it patches anything. On **atomic** elements it is content-only *and* the values must be typed:
+
+- **Content, in raw `$$type` shape.** Atomic settings are typed props, not flat strings — a hand-patch bypasses the wrapping the dedicated `add-atomic-*` tools do for you, exactly like the universal `add-atomic-widget` / `update-atomic-widget` escape hatch (`files/references/atomic-v4.md`). Write `title: "Hi"` into an atomic heading and it saves and renders nothing. Fetch the shape with `get-widget-schema` and build the typed value by hand, or skip the patch and let `update-atomic-widget` do the write.
+- **Styling — not through `settings` at all.** Patch the element's `styles` variant and keep its id in `settings.classes`, or use `create-global-class` / `apply-global-class`, which is the supported path and survives element rebuilds.
+
+Both failures look identical from the outside: the walker matches, the save succeeds, the caches clear, the pixels don't move.
 
 The `$missing` check above is the habit that pays for itself: without it a typo'd id in a 40-element patch commits a partial write that looks like a success. Keeping the patch as an `id => settings` map is what makes that check — and the diff — readable.
 
