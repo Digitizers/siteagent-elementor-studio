@@ -75,6 +75,8 @@ A fresh install presented as **zero tools exposed**. The cause was the `elemento
 **Diagnose:** `wp option get elementor_mcp_disabled_tools --format=json`
 **Fix:** back the list up to the project, then `wp option update elementor_mcp_disabled_tools '[]' --format=json` and restart Claude Code (see gotcha 6 — the tool list is read at startup).
 
+**On a client with a tight tool cap, don't clear the whole list.** Emptying it exposes the full Pro+atomic set (~113 tools), which overruns Antigravity's ~100 cap — the client silently truncates, and the tools that fall off can be the atomic essentials, turning "no tools" into the subtler "writes don't persist" (`files/SKILL.md`, the Antigravity note). There, enable the plugin's **Low-tools mode** (WP Admin → MCP Tools), whose curated set keeps the five atomic essentials under the cap, or re-enable only the slugs the job needs. Clear the list outright only on clients with no cap.
+
 Do this *before* concluding a tool doesn't exist. On this build, `create-theme-template`, `set-template-conditions`, and `sideload-image` were all in that list, and all three jobs were done by hand before anyone checked.
 
 **Clearing that option alone does not stick.** A seeder in `includes/admin/class-admin.php` re-disables every Pro-badged tool whenever `elementor_mcp_defaults_applied` is below its `DEFAULTS_VERSION` — deliberately, so new Pro batches ship off by default and sites stay under client tool caps. Emptying the disabled list without touching that counter leaves the seeder armed, and the next admin request silently re-disables the pack. On this site that happened during a plugin upgrade: 36 tools vanished, exactly the `pro`-badged set, and the count only came to light from an ability-vs-tool diff.
@@ -432,15 +434,22 @@ $patch = json_decode( file_get_contents( $file ), true );   // id => settings ma
 if ( ! is_array( $patch ) ) { echo "bad patch json\n"; exit( 1 ); }
 $data = json_decode( get_post_meta( $pid, '_elementor_data', true ), true );
 if ( ! is_array( $data ) ) { echo "post $pid has no usable _elementor_data — aborting\n"; exit( 1 ); }
-$walk = function ( &$els ) use ( &$walk, $patch ) {
+$hit  = [];
+$walk = function ( &$els ) use ( &$walk, $patch, &$hit ) {
     foreach ( $els as &$e ) {
         if ( isset( $patch[ $e['id'] ] ) ) {
             $e['settings'] = array_merge( $e['settings'], $patch[ $e['id'] ] );
+            $hit[ $e['id'] ] = true;
         }
         if ( ! empty( $e['elements'] ) ) { $walk( $e['elements'] ); }
     }
 };
 $walk( $data );
+
+// Abort before saving if any target is missing — a partial write is worse
+// than none, because it looks like it worked.
+$missing = array_diff( array_keys( $patch ), array_keys( $hit ) );
+if ( $missing ) { echo "ids not found: " . implode( ',', $missing ) . " — nothing written\n"; exit( 1 ); }
 update_post_meta( $pid, '_elementor_data', wp_slash( wp_json_encode( $data ) ) );
 delete_post_meta( $pid, '_elementor_element_cache' );
 \Elementor\Plugin::$instance->files_manager->clear_cache();
@@ -448,7 +457,7 @@ delete_post_meta( $pid, '_elementor_element_cache' );
 
 **2. `delete_post_meta( $id, '_elementor_element_cache' )` is not optional.** Elementor caches rendered element HTML in that meta. `files_manager->clear_cache()` clears the *CSS* and leaves it. Skip the delete and a perfectly correct write serves the old HTML — which reads exactly like a failed write, and sends you rebuilding elements that were never broken. Elementor's own `Document::save()` deletes it; direct writers have to do it themselves.
 
-Two habits that pay for themselves: **assert every target id was found** before saving (a typo'd id silently patches nothing), and keep the patch as a `id => settings` map so the diff is readable.
+The `$missing` check above is the habit that pays for itself: without it a typo'd id in a 40-element patch commits a partial write that looks like a success. Keeping the patch as an `id => settings` map is what makes that check — and the diff — readable.
 
 ---
 
