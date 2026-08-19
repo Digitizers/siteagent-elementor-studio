@@ -431,6 +431,7 @@ That stores a serialized PHP array. Elementor expects a JSON *string*. The page 
 $patch = json_decode( file_get_contents( $file ), true );   // id => settings map
 if ( ! is_array( $patch ) ) { echo "bad patch json\n"; exit( 1 ); }
 $data = json_decode( get_post_meta( $pid, '_elementor_data', true ), true );
+if ( ! is_array( $data ) ) { echo "post $pid has no usable _elementor_data — aborting\n"; exit( 1 ); }
 $walk = function ( &$els ) use ( &$walk, $patch ) {
     foreach ( $els as &$e ) {
         if ( isset( $patch[ $e['id'] ] ) ) {
