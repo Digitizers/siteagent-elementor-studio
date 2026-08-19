@@ -470,6 +470,10 @@ delete_post_meta( $pid, '_elementor_element_cache' );
 
 **2. `delete_post_meta( $id, '_elementor_element_cache' )` is not optional.** Elementor caches rendered element HTML in that meta. `files_manager->clear_cache()` clears the *CSS* and leaves it. Skip the delete and a perfectly correct write serves the old HTML — which reads exactly like a failed write, and sends you rebuilding elements that were never broken. Elementor's own `Document::save()` deletes it; direct writers have to do it themselves.
 
+**3. This walker patches `settings` — which on atomic (v4) pages is the wrong half for anything visual.** Atomic layout and appearance don't live in `settings`: they live in the element's **top-level `styles` map**, referenced from `settings.classes` (convention 8 and `files/references/atomic-v4.md`). Merge a padding or position change into an atomic element's `settings` and you get the whole silent-success chain — the walker matches the id, the save succeeds, both caches clear, and the page renders exactly as before.
+
+So scope the recipe: on **classic (v3)** elements it patches anything; on **atomic** elements use it only for **content** settings (a heading's `title`, a paragraph's text, a link URL). For atomic *styling* in bulk, patch the element's `styles` variant and make sure its id is present in `settings.classes` — or don't hand-patch at all and use `create-global-class` / `apply-global-class`, which is the supported path and survives element rebuilds.
+
 The `$missing` check above is the habit that pays for itself: without it a typo'd id in a 40-element patch commits a partial write that looks like a success. Keeping the patch as an `id => settings` map is what makes that check — and the diff — readable.
 
 ---
