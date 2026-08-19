@@ -86,7 +86,7 @@ wp option get elementor_mcp_defaults_applied        # must be >= DEFAULTS_VERSIO
 wp option get elementor_mcp_premium_unlock_applied
 ```
 
-If you clear the list, check both counters afterwards — and re-check the exposed tool count after any plugin upgrade.
+**Order matters — clearing while the seeder is armed is what fails.** If `elementor_mcp_defaults_applied` is *below* `DEFAULTS_VERSION`, the seeder has not run yet, so let it run **first**: load any wp-admin page once (that's the request that seeds and bumps the counter), confirm the counter now matches, and *then* clear the disabled list. Clear it before that and the very next admin request re-disables the pack. After any plugin upgrade the counter can fall behind again — so the sequence is: upgrade → load wp-admin once → check the counter → clear/curate the list → restart the client → re-check the exposed tool count.
 
 ### 9. A Hebrew site locale renders the whole design RTL
 
@@ -264,6 +264,8 @@ custom_css: selector .sp-grad{background:linear-gradient(96deg,#d24d00,#ff6601 4
 **On Free**, the same rule goes in **Appearance → Customize → Additional CSS** (core WordPress, unfiltered) or a child-theme stylesheet — scoped by the wrapper you can actually attach: `.sp-grad` inside the title survives KSES because it is a class attribute, not a style property, so `.sp-grad{…}` alone is usually enough; scope it with `.elementor-element-<id> .sp-grad` if the class name is reused elsewhere, remembering that the id changes if the element is rebuilt.
 
 The same trap applies to any inline style carrying a property outside the KSES list — check the rendered markup, not the stored setting.
+
+> **`selector` is a Pro token.** Every recipe below that writes `selector{…}` assumes per-element `custom_css`, which is Pro — Elementor expands `selector` to `.elementor-element-<id>` when it compiles the rule server-side. On **Free**, put the same rule in **Appearance → Customize → Additional CSS** (or a child-theme stylesheet) and write that selector yourself: `.elementor-element-<id>{…}`, or a class you attached — remembering the id changes if the element is rebuilt, and that on atomic elements an arbitrary class won't attach (convention 8).
 
 ### 13. `transform: scale()` shrinks the paint, not the layout
 
