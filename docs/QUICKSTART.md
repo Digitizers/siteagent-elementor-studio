@@ -159,7 +159,7 @@ Common causes:
 
 ## Lessons learned (the reasons this script exists)
 
-This setup looks simple in 7 steps because the script absorbed all the friction we hit the first time. If you're curious what's under the hood, see [`ELEMENTOR_MCP_LESSONS.md`](ELEMENTOR_MCP_LESSONS.md).
+This setup looks simple in 7 steps because the script absorbed all the friction we hit the first time. If you're curious what's under the hood, see [`LESSONS.md`](LESSONS.md).
 
 ---
 
