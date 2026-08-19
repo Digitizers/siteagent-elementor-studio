@@ -428,7 +428,9 @@ wp post meta update 907 _elementor_data '<json>' --format=json   # ✗ corrupts 
 That stores a serialized PHP array. Elementor expects a JSON *string*. The page opens empty. Use `wp eval-file` instead:
 
 ```php
-$data = json_decode( get_post_meta( $id, '_elementor_data', true ), true );
+$patch = json_decode( file_get_contents( $file ), true );   // id => settings map
+if ( ! is_array( $patch ) ) { echo "bad patch json\n"; exit( 1 ); }
+$data = json_decode( get_post_meta( $pid, '_elementor_data', true ), true );
 $walk = function ( &$els ) use ( &$walk, $patch ) {
     foreach ( $els as &$e ) {
         if ( isset( $patch[ $e['id'] ] ) ) {
@@ -438,8 +440,8 @@ $walk = function ( &$els ) use ( &$walk, $patch ) {
     }
 };
 $walk( $data );
-update_post_meta( $id, '_elementor_data', wp_slash( wp_json_encode( $data ) ) );
-delete_post_meta( $id, '_elementor_element_cache' );
+update_post_meta( $pid, '_elementor_data', wp_slash( wp_json_encode( $data ) ) );
+delete_post_meta( $pid, '_elementor_element_cache' );
 \Elementor\Plugin::$instance->files_manager->clear_cache();
 ```
 
@@ -459,7 +461,7 @@ Two habits that pay for themselves: **assert every target id was found** before 
 - **Search the markup by byte range, not by string.** Exported headings are split across styled spans, so `find("Get solid in three steps")` returns nothing while the text is plainly on screen. Build a section index of byte offsets once, then slice.
 - **Copy beats design.** When the client's content document and the design disagree, the document wins — and when there are two revisions of it, confirm which is authoritative before implementing either.
 
-Some compositions have no container equivalent — Elementor has no `position: absolute`, so orbiting badges, overlapping cards, and off-grid decoration can't be expressed. **A Lottie is the escape hatch** and keeps the design's real arrangement. If you author one in code: bodymovin easing handles must be arrays (`{"x":[0.5],"y":[1.0]}`) — scalars silently freeze the layer — and watch the export scale, since `deviceScaleFactor` multiplies with any clip scale.
+Orbiting badges, overlapping cards, and off-grid decoration have no *flex-flow* equivalent, but they are still expressible in Elementor: per-element `custom_css` (`selector{position:absolute;top:…;left:…}`) works on any element, and classic widgets also carry the `_position: absolute` control. What's missing is only the MCP **atomic prop mapper** — `build_common_props()` has no `position` mapping (field report #4) — so on a 4.x atomic page route the positioning through `custom_css` rather than concluding it can't be done. **A Lottie is the last resort**, for compositions that also animate; it keeps the design's arrangement at the price of editability. If you author one in code: bodymovin easing handles must be arrays (`{"x":[0.5],"y":[1.0]}`) — scalars silently freeze the layer — and watch the export scale, since `deviceScaleFactor` multiplies with any clip scale.
 
 ---
 
@@ -477,7 +479,7 @@ Work down this list before concluding a write failed. Most "the tool didn't work
 ### Screenshots that don't lie
 
 - **Always pass `--virtual-time-budget`** to headless Chrome (`--virtual-time-budget=15000`). Without it the shot is taken before webfonts load, and you'll "fix" typography that was already correct.
-- **The first screenshot after clearing the cache renders unstyled.** Elementor regenerates `post-<id>.css` on the next page view, and a screenshot that races it comes back with fallback fonts, no colours, and a wrong page height — an entire site that looks catastrophically broken. Warm the page with one throwaway request after any cache clear, and before believing a bad shot, take a second one at a different width. If only one width is broken, it's the cache, not your CSS.
+- **The first screenshot after clearing the cache renders unstyled.** Elementor regenerates `post-<id>.css` on the next page view, and a screenshot that races it comes back with fallback fonts, no colours, and a wrong page height — an entire site that looks catastrophically broken. Warm the page with one throwaway request after any cache clear, and before believing a bad shot, take a second one at a different width. If **every** width is broken the same way, suspect the cache race — warm and re-shoot. If **only one** width is broken, that is the signature of a real responsive bug (a media query, a breakpoint boundary, a `_tablet`/`_mobile` control) — re-shoot once after warming to rule the race out, then go read the responsive CSS rather than blaming the cache; writing off a single-width failure as cache is how a real mobile regression ships.
 - **Headless Chrome has a ~500px minimum layout width.** `--window-size=390,N` does not render a 390px viewport; it renders 500px and crops. Mobile was twice reported broken on this build on that evidence alone, and was fine both times. For real mobile, drive CDP and call `Emulation.setDeviceMetricsOverride`.
 - Verify at **1440 / 1024 / 390** once a section is settled, not before.
 
