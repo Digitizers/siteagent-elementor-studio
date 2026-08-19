@@ -471,7 +471,15 @@ The `$missing` check above is the habit that pays for itself: without it a typo'
 - **Search the markup by byte range, not by string.** Exported headings are split across styled spans, so `find("Get solid in three steps")` returns nothing while the text is plainly on screen. Build a section index of byte offsets once, then slice.
 - **Copy beats design.** When the client's content document and the design disagree, the document wins — and when there are two revisions of it, confirm which is authoritative before implementing either.
 
-Orbiting badges, overlapping cards, and off-grid decoration have no *flex-flow* equivalent, but they are still expressible in Elementor: per-element `custom_css` (`selector{position:absolute;top:…;left:…}`) works on any element, and classic widgets also carry the `_position: absolute` control. What's missing is only the MCP **atomic prop mapper** — `build_common_props()` has no `position` mapping (field report #4) — so on a 4.x atomic page route the positioning through `custom_css` rather than concluding it can't be done. **A Lottie is the last resort**, for compositions that also animate; it keeps the design's arrangement at the price of editability. If you author one in code: bodymovin easing handles must be arrays (`{"x":[0.5],"y":[1.0]}`) — scalars silently freeze the layer — and watch the export scale, since `deviceScaleFactor` multiplies with any clip scale.
+Orbiting badges, overlapping cards, and off-grid decoration have no *flex-flow* equivalent, but they are still expressible — the route depends on the tier and the engine, and none of them is "impossible":
+
+| Site | Route |
+|---|---|
+| **Pro**, any engine | Per-element `custom_css` — `selector{position:absolute;top:…;left:…}` (see the `custom_css` note above). The tidiest option. |
+| **Free + classic (v3)** | The widget's own `_position: absolute` control, with `_offset_x` / `_offset_y`. |
+| **Free + atomic (v4)** | Neither of the above applies (`custom_css` is Pro; `_position` is a classic-widget control). Assign a class through the element's `css_classes` / `_css_classes` control (mind the container-vs-widget key above) and carry the rule in **Appearance → Customize → Additional CSS** — core WordPress, free, always available — or in a child-theme stylesheet. Keyed to your own class it survives re-saves; keyed to `.elementor-element-<id>` it does not survive a rebuild of that element. |
+
+What is *not* available on any tier is expressing it through the MCP's atomic props: `build_common_props()` has no `position` mapping (field report #4). **A Lottie is the last resort**, for compositions that also animate; it keeps the design's arrangement at the price of editability. If you author one in code: bodymovin easing handles must be arrays (`{"x":[0.5],"y":[1.0]}`) — scalars silently freeze the layer — and watch the export scale, since `deviceScaleFactor` multiplies with any clip scale.
 
 ---
 
