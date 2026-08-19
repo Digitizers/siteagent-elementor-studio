@@ -470,6 +470,17 @@ delete_post_meta( $pid, '_elementor_element_cache' );
 
 **2. `delete_post_meta( $id, '_elementor_element_cache' )` is not optional.** Elementor caches rendered element HTML in that meta. `files_manager->clear_cache()` clears the *CSS* and leaves it. Skip the delete and a perfectly correct write serves the old HTML — which reads exactly like a failed write, and sends you rebuilding elements that were never broken. Elementor's own `Document::save()` deletes it; direct writers have to do it themselves.
 
+**3. This walker patches `settings` — which on atomic (v4) pages is the wrong half for anything visual.** Atomic layout and appearance don't live in `settings`: they live in the element's **top-level `styles` map**, referenced from `settings.classes` (convention 8 and `files/references/atomic-v4.md`). Merge a padding or position change into an atomic element's `settings` and you get the whole silent-success chain — the walker matches the id, the save succeeds, both caches clear, and the page renders exactly as before.
+
+So scope the recipe: on **classic (v3)** elements it patches anything. On **atomic** elements it is content-only *and* the values must be typed:
+
+- **Content, in raw `$$type` shape.** Atomic settings are typed props, not flat strings. Write `title: "Hi"` into an atomic heading by hand and it saves and renders nothing: fetch the shape with `get-widget-schema` and build the typed value yourself. **A direct DB patch has no wrapper to fall back on** — it bypasses the plugin entirely, so this applies to every atomic prop, always.
+
+  Going *through the tools* is the way out, and the reason is worth knowing: since plugin **1.27.0**, `save_page_data()` sweeps the whole tree through `Elementor_MCP_Atomic_Props::coerce_tree()` before writing, so flat values handed to any tool — `update-atomic-widget` included — are wrapped into the envelope the prop declares. On **older builds** that sweep doesn't exist and the universal `add-atomic-widget` / `update-atomic-widget` tools write settings verbatim, which is the behaviour `files/references/atomic-v4.md` still describes; check the plugin version before trusting either statement.
+- **Styling — not through `settings` at all.** Patch the element's `styles` variant and keep its id in `settings.classes`, or use `create-global-class` / `apply-global-class`, which is the supported path. Note what does and doesn't survive a rebuild: the **class definition** is site-level and outlives any element, but the **binding is per-element** — `apply-global-class` appends the `g-` id to that element's `settings.classes` (`files/references/design-system-crud.md`), so a deleted-and-recreated element comes back unstyled and has to be re-applied. That's still the cheapest option of the three, because re-applying is one call against a definition you didn't lose.
+
+Both failures look identical from the outside: the walker matches, the save succeeds, the caches clear, the pixels don't move.
+
 The `$missing` check above is the habit that pays for itself: without it a typo'd id in a 40-element patch commits a partial write that looks like a success. Keeping the patch as an `id => settings` map is what makes that check — and the diff — readable.
 
 ---
