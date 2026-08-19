@@ -92,7 +92,12 @@ If you clear the list, check both counters afterwards — and re-check the expos
 
 `WPLANG=he_IL` flips Elementor's body direction, so an LTR design arrives mirrored — columns reversed, text right-aligned — with nothing wrong in `_elementor_data`.
 
-**Fix:** `wp option update WPLANG en_US` when the design is LTR, regardless of who the client is. Set the site language to match the *design*, not the conversation.
+**Decide by the site's own language, not by the design and not by the conversation.** `WPLANG` sets admin translations, date/number formatting, and the `lang`/`dir` the browser and screen readers read — it is not a layout switch. Two cases:
+
+- **The site itself is English** (English content, English audience) and the locale was left Hebrew because of who set it up: the locale is simply wrong. `wp option update WPLANG en_US` fixes the label *and* the direction. This was the case on this build.
+- **The site is genuinely Hebrew** and only this design is LTR: keep `he_IL` — flipping it de-localizes the whole site. Override direction where it applies (`direction:ltr;text-align:left` on the section's containers, per the tier table in the working-from-a-design-export section), and expect to fight Elementor's RTL stylesheet, which loads whenever `is_rtl()` is true.
+
+Never change the locale to fix pixels on a site whose content is Hebrew.
 
 ### 10. Raise `WP_MEMORY_LIMIT` before building a long page
 
@@ -213,7 +218,9 @@ selector:hover{transform:translateY(-4px);}
 
 Anything that translates HTML into containers writes literal `width: 320px` where the source had a grid track. The page then looks right at the design width and wrong everywhere else — cards sitting at a third of the row, not filling it.
 
-**Fix** with `custom_css` on each card, not with the width control:
+**Free route — no CSS at all, and it's the better default.** Clear the frozen `width` on each card and set its **flex item** settings instead (child container → Layout → `flex_grow: 1`, `flex_shrink: 1`, `flex_basis: 0`, plus `min-width: 0` — see convention 14). Equal columns then fill the row at every width with no arithmetic, because flex distributes what's left *after* the parent's gap. Per-breakpoint column counts come from the parent's `flex_wrap: wrap` plus a `flex_basis` percentage on tablet/mobile (e.g. `50%` / `100%`).
+
+**Pro route — when the columns are deliberately unequal or must hit an exact track.** Per-element `custom_css` (Pro; see the note above), which buys precision the controls don't expose:
 
 ```
 selector{flex:0 0 calc((100% - 48px)/3);max-width:calc((100% - 48px)/3);min-width:0;}
@@ -221,7 +228,7 @@ selector{flex:0 0 calc((100% - 48px)/3);max-width:calc((100% - 48px)/3);min-widt
 @media(max-width:767px){selector{flex:0 0 100%;max-width:100%;}}
 ```
 
-The gap total in the numerator is `(columns - 1) × gap`. Also expect **buttons to arrive as bare text widgets** — rebuild them as real Button widgets rather than styling the text.
+The gap total in the numerator is `(columns - 1) × gap` — the arithmetic the flex route avoids entirely. On Free + atomic, where `custom_css` isn't available, the same rules go in the Customizer's Additional CSS keyed to `.elementor-element-<id>` (tier table above). Also expect **buttons to arrive as bare text widgets** — rebuild them as real Button widgets rather than styling the text.
 
 ### 10. Container gap replaces per-child margins, and the default is not zero
 
