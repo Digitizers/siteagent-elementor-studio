@@ -474,7 +474,9 @@ delete_post_meta( $pid, '_elementor_element_cache' );
 
 So scope the recipe: on **classic (v3)** elements it patches anything. On **atomic** elements it is content-only *and* the values must be typed:
 
-- **Content, in raw `$$type` shape.** Atomic settings are typed props, not flat strings — a hand-patch bypasses the wrapping the dedicated `add-atomic-*` tools do for you, exactly like the universal `add-atomic-widget` / `update-atomic-widget` escape hatch (`files/references/atomic-v4.md`). Write `title: "Hi"` into an atomic heading and it saves and renders nothing. Fetch the shape with `get-widget-schema` and build the typed value by hand, or skip the patch and let `update-atomic-widget` do the write.
+- **Content, in raw `$$type` shape.** Atomic settings are typed props, not flat strings. Write `title: "Hi"` into an atomic heading by hand and it saves and renders nothing: fetch the shape with `get-widget-schema` and build the typed value yourself. **A direct DB patch has no wrapper to fall back on** — it bypasses the plugin entirely, so this applies to every atomic prop, always.
+
+  Going *through the tools* is the way out, and the reason is worth knowing: since plugin **1.27.0**, `save_page_data()` sweeps the whole tree through `Elementor_MCP_Atomic_Props::coerce_tree()` before writing, so flat values handed to any tool — `update-atomic-widget` included — are wrapped into the envelope the prop declares. On **older builds** that sweep doesn't exist and the universal `add-atomic-widget` / `update-atomic-widget` tools write settings verbatim, which is the behaviour `files/references/atomic-v4.md` still describes; check the plugin version before trusting either statement.
 - **Styling — not through `settings` at all.** Patch the element's `styles` variant and keep its id in `settings.classes`, or use `create-global-class` / `apply-global-class`, which is the supported path and survives element rebuilds.
 
 Both failures look identical from the outside: the walker matches, the save succeeds, the caches clear, the pixels don't move.
