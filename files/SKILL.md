@@ -319,10 +319,12 @@ Elementor 4 uses an atomic/V4 data model — classic widget writes don't persist
 > `settings.classes` (a typed list of class ids the element wears) **and** a separate
 > top-level `styles` map holding each class's definition. Every id in `settings.classes`
 > must resolve to a local `styles` entry or a Global Class `g-` id, or it styles nothing.
-> The dedicated helpers build the local `styles` map for you **at creation**. Note
-> `update-atomic-widget` merges `settings` only — it **cannot** write the top-level `styles`
-> map, so restyle by (re)creating with a style-capable helper / universal `add-atomic-widget`,
-> or point `settings.classes` at a Global Class. Full pattern → `references/atomic-v4.md`.
+> The dedicated helpers build the local `styles` map for you **at creation**. To restyle an
+> element that already exists: on plugin **1.28.1+** pass flat style params to
+> `update-atomic-widget` and it merges them into the base variant; on **older builds** it
+> merged `settings` only and could not write the `styles` map, so restyle there by
+> (re)creating with a style-capable helper / universal `add-atomic-widget`, or point
+> `settings.classes` at a Global Class. Full pattern → `references/atomic-v4.md`.
 
 ### Converting a classic (V3) design to atomic (V4)
 

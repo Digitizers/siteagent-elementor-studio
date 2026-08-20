@@ -83,11 +83,12 @@ style def in this element's `styles` map, or to a **Global Class** `g-` id in th
 Manager (`apply-global-class` / `create-global-class`). A local id present in `styles`
 but missing from `settings.classes` won't apply; an id in `settings.classes` with no
 `styles` entry and no matching global class is a dangling reference that styles nothing.
-The **local `styles` map is built at element-creation time** — the `add-atomic-*` /
+The local `styles` map is **built at element-creation time** by the `add-atomic-*` /
 `add-flexbox` helpers (and the universal **`add-atomic-widget`** — *not* the classic
-`add-widget`, whose writes don't persist on a V4 page) auto-compile a local class from the
-style props you pass (typography, color, background, …) into the element's `styles` map and
-wire its id into `settings.classes` for you.
+`add-widget`, whose writes don't persist on a V4 page): they auto-compile a local class
+from the style props you pass (typography, color, background, …) into the element's
+`styles` map and wire its id into `settings.classes` for you. On plugin **1.28.1+** it can
+also be written **after** creation, via `update-atomic-widget` — see the note below.
 
 > **Restyling an existing element depends on the plugin version.**
 >
