@@ -142,6 +142,16 @@ You may also call `detect-elementor-version` (reliable on current releases — i
 returns whether atomic is supported). The old v1.5.0 schema bug is fixed; still,
 tool-presence is the most direct signal.
 
+> **Which elementor-mcp PLUGIN version am I on?** Some behaviour below branches on
+> it, and `detect-elementor-version` answers about *Elementor*, not the plugin.
+> Call **`server-info`**: it returns `plugin_version` (plus registered-vs-exposed
+> tool counts and what is withholding the rest). It is always registered and
+> cannot be disabled, so **its absence is itself the answer** — no `server-info`
+> means the site is on **1.28.0 or older**. Use it for the one branch that needs it —
+> whether `update-atomic-widget` can restyle in place (1.28.1+). Nothing else should
+> depend on the version: for the universal atomic tools, pass raw `$$type` values, which
+> are correct on every build.
+
 > ⚠️ **Antigravity / tight tool caps.** Antigravity caps MCP tools at ~100. The
 > full Pro+atomic set is ~113, so atomic tools can get truncated and never reach
 > the client — making a V4 site look like "writes don't persist". Fix: enable the
@@ -319,10 +329,13 @@ Elementor 4 uses an atomic/V4 data model — classic widget writes don't persist
 > `settings.classes` (a typed list of class ids the element wears) **and** a separate
 > top-level `styles` map holding each class's definition. Every id in `settings.classes`
 > must resolve to a local `styles` entry or a Global Class `g-` id, or it styles nothing.
-> The dedicated helpers build the local `styles` map for you **at creation**. Note
-> `update-atomic-widget` merges `settings` only — it **cannot** write the top-level `styles`
-> map, so restyle by (re)creating with a style-capable helper / universal `add-atomic-widget`,
-> or point `settings.classes` at a Global Class. Full pattern → `references/atomic-v4.md`.
+> The dedicated helpers build the local `styles` map for you **at creation**. To restyle an
+> element that already exists (check the plugin version with `server-info` — absent means
+> ≤1.28.0): on plugin **1.28.1+** pass flat style params to
+> `update-atomic-widget` and it merges them into the base variant; on **older builds** it
+> merged `settings` only and could not write the `styles` map, so restyle there by
+> (re)creating with a style-capable helper / universal `add-atomic-widget`, or point
+> `settings.classes` at a Global Class. Full pattern → `references/atomic-v4.md`.
 
 ### Converting a classic (V3) design to atomic (V4)
 
