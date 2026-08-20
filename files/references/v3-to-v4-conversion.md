@@ -30,7 +30,7 @@ engine once (atomic tools present ⇒ V4) and commit to one family for the whole
 | `add-video` (YouTube) | `add-atomic-youtube` | writes the `source` prop |
 | self-hosted video | `add-atomic-video` | |
 | `add-divider` | `add-atomic-divider` | |
-| **anything else** | `add-atomic-widget` / `update-atomic-widget` | universal escape hatch — flat values coerced on plugin 1.27.0+, raw `$$type` on older builds |
+| **anything else** | `add-atomic-widget` / `update-atomic-widget` | universal escape hatch — pass raw `$$type` settings (correct on every version) |
 
 Structural tools (`get-page-structure`, `find-element`, `duplicate-element`,
 `move-element`, `remove-element`, `reorder-elements`, `update-element`) are engine-neutral
@@ -41,14 +41,13 @@ and work on both.
 Per `atomic-v4.md`: the **dedicated** atomic helpers (`add-atomic-heading`,
 `add-flexbox`, …) take **flat** values and wrap them into `$$type` props for you.
 
-The **universal** `add-atomic-widget` / `update-atomic-widget` depend on the plugin
-version (read it from `server-info`; if that tool is absent the site is 1.28.0 or older,
-since it cannot be disabled where it exists): since **1.27.0** the save path coerces the
-whole tree, so flat values are
-wrapped there too; on **older builds** they wrote settings verbatim and flat values were
-silently saved as empty. Fetch the shape with `get-widget-schema` and build typed props
-by hand when the version is older or unknown. A direct `_elementor_data` patch never gets
-a wrapper on any version.
+For the **universal** `add-atomic-widget` / `update-atomic-widget`, pass raw `$$type`
+values (fetch the shape with `get-widget-schema`). That holds on every plugin version:
+since **1.27.0** the save path coerces flat values, and already-typed props pass through
+untouched; on **older builds** those tools wrote settings verbatim and flat values were
+silently saved as empty. Typed works either way, so don't make the write depend on a
+version you may not be able to read mid-session. A direct `_elementor_data` patch never
+gets a wrapper on any version.
 
 Prefer the dedicated helpers for everything they cover; use the universal tool only for
 atomic types without a helper.

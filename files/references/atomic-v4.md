@@ -18,7 +18,7 @@ persist on an atomic page, and atomic writes don't belong on a classic page.
 | Button | `add-button` | `add-atomic-button` |
 | Image | `add-image` | `add-atomic-image` |
 | SVG / video / divider | `add-icon` / `add-html` | `add-atomic-svg` / `add-atomic-youtube` / `add-atomic-video` / `add-atomic-divider` |
-| Anything else | `add-widget` | `add-atomic-widget` *(any atomic type; flat values are coerced on plugin 1.27.0+, raw `$$type` on older builds — see note)* / `update-atomic-widget` |
+| Anything else | `add-widget` | `add-atomic-widget` *(any atomic type; pass raw `$$type` settings — correct on every version, see note)* / `update-atomic-widget` |
 
 ### The atomic data model (what's different)
 
@@ -27,18 +27,16 @@ persist on an atomic page, and atomic writes don't belong on a classic page.
   `add-atomic-button`, `add-flexbox`, …) the MCP wraps them for you — **pass simple
   flat values** (e.g. `title: "Hello"`, a hex `color`, a `{size,unit}` dimension) and
   it stores them in the `$$type` format Elementor's atomic engine expects.
-  **Since plugin 1.27.0 that also covers the universal tools.** (Check the version with
-  **`server-info`** — it reports `plugin_version`, is always registered and cannot be
-  disabled, so its absence means the site is on 1.28.0 or older.) `save_page_data()`
-  sweeps the whole tree through `Atomic_Props::coerce_tree()` before writing, so a
-  flat value handed to `add-atomic-widget` / `update-atomic-widget` is coerced to
-  the envelope the prop declares. On **older builds** those two wrote settings
-  verbatim and flat values were silently saved as empty/ignored — check the plugin
-  version before relying on either behaviour, and use `get-widget-schema` to build
-  typed props by hand when in doubt.
+  **For the universal `add-atomic-widget` / `update-atomic-widget`, always pass raw
+  `$$type` values** (fetch the shape with `get-widget-schema`). That is correct on
+  every plugin version: since 1.27.0 the save path coerces flat values through
+  `Atomic_Props::coerce_tree()`, and already-typed props pass through it untouched —
+  whereas on older builds those two tools wrote settings verbatim and a flat value
+  was silently saved as empty. Typed values work either way, and the version is not
+  always knowable mid-session, so don't make the write depend on it.
 
-  **A direct `_elementor_data` patch has no wrapper either way.** It bypasses the
-  plugin, so every prop must be in raw `$$type` shape there, on any version.
+  **A direct `_elementor_data` patch has no wrapper on any version.** It bypasses the
+  plugin entirely, so every prop must be raw `$$type` there too.
 - **Styles live in a separate `styles` map**, not inline on the element. Layout
   props on `add-flexbox` (direction/justify/align/gap) are written as local styles
   automatically — you don't hand-build the styles map.

@@ -147,8 +147,10 @@ tool-presence is the most direct signal.
 > Call **`server-info`**: it returns `plugin_version` (plus registered-vs-exposed
 > tool counts and what is withholding the rest). It is always registered and
 > cannot be disabled, so **its absence is itself the answer** — no `server-info`
-> means the site is on **1.28.0 or older**, which is exactly the boundary the
-> version-branched guidance cares about.
+> means the site is on **1.28.0 or older**. Use it for the one branch that needs it —
+> whether `update-atomic-widget` can restyle in place (1.28.1+). Nothing else should
+> depend on the version: for the universal atomic tools, pass raw `$$type` values, which
+> are correct on every build.
 
 > ⚠️ **Antigravity / tight tool caps.** Antigravity caps MCP tools at ~100. The
 > full Pro+atomic set is ~113, so atomic tools can get truncated and never reach
