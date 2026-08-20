@@ -27,14 +27,27 @@ persist on an atomic page, and atomic writes don't belong on a classic page.
   `add-atomic-button`, `add-flexbox`, …) the MCP wraps them for you — **pass simple
   flat values** (e.g. `title: "Hello"`, a hex `color`, a `{size,unit}` dimension) and
   it stores them in the `$$type` format Elementor's atomic engine expects.
-  **Exception — the universal `add-atomic-widget` / `update-atomic-widget` escape
-  hatch does NOT wrap for you.** It writes settings verbatim, so it needs values
-  already in raw `$$type` shape; flat values passed there are silently saved as
-  empty/ignored settings. For those two tools, fetch the shape with
-  `get-widget-schema` and build the typed props by hand.
+  **Since plugin 1.27.0 that also covers the universal tools.** `save_page_data()`
+  sweeps the whole tree through `Atomic_Props::coerce_tree()` before writing, so a
+  flat value handed to `add-atomic-widget` / `update-atomic-widget` is coerced to
+  the envelope the prop declares. On **older builds** those two wrote settings
+  verbatim and flat values were silently saved as empty/ignored — check the plugin
+  version before relying on either behaviour, and use `get-widget-schema` to build
+  typed props by hand when in doubt.
+
+  **A direct `_elementor_data` patch has no wrapper either way.** It bypasses the
+  plugin, so every prop must be in raw `$$type` shape there, on any version.
 - **Styles live in a separate `styles` map**, not inline on the element. Layout
   props on `add-flexbox` (direction/justify/align/gap) are written as local styles
   automatically — you don't hand-build the styles map.
+
+  **Since plugin 1.28.1, `update-atomic-widget` takes flat style params too**
+  (`padding`, `width`, `border_*`, `css_position`, `shadow_*`, typography, …) and
+  merges them into the element's base style variant, preserving props it wasn't
+  asked to change. Before that it wrote only `settings`, so a padding sent there
+  saved, reported success and rendered nothing — which is why older notes say
+  delete-and-recreate is the only way to restyle an atomic element. It isn't any
+  more. `settings` still means CONTENT.
 - **Confirm keys per widget** with `get-widget-schema` before building anything
   non-trivial; the atomic prop names differ from the classic control names.
 
