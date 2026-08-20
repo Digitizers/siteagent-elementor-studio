@@ -27,7 +27,9 @@ persist on an atomic page, and atomic writes don't belong on a classic page.
   `add-atomic-button`, `add-flexbox`, …) the MCP wraps them for you — **pass simple
   flat values** (e.g. `title: "Hello"`, a hex `color`, a `{size,unit}` dimension) and
   it stores them in the `$$type` format Elementor's atomic engine expects.
-  **Since plugin 1.27.0 that also covers the universal tools.** `save_page_data()`
+  **Since plugin 1.27.0 that also covers the universal tools.** (Check the version with
+  **`server-info`** — it reports `plugin_version`, is always registered and cannot be
+  disabled, so its absence means the site is on 1.28.0 or older.) `save_page_data()`
   sweeps the whole tree through `Atomic_Props::coerce_tree()` before writing, so a
   flat value handed to `add-atomic-widget` / `update-atomic-widget` is coerced to
   the envelope the prop declares. On **older builds** those two wrote settings
@@ -90,7 +92,9 @@ from the style props you pass (typography, color, background, …) into the elem
 `styles` map and wire its id into `settings.classes` for you. On plugin **1.28.1+** it can
 also be written **after** creation, via `update-atomic-widget` — see the note below.
 
-> **Restyling an existing element depends on the plugin version.**
+> **Restyling an existing element depends on the plugin version** — read it from
+> `server-info` (`plugin_version`); if that tool isn't exposed at all, the site is on
+> 1.28.0 or older, since it cannot be disabled on builds that have it.
 >
 > On **1.28.1+**, `update-atomic-widget` takes flat style params (`padding`, `width`,
 > `border_*`, `css_position`, `shadow_*`, typography, …) and merges them into the element's

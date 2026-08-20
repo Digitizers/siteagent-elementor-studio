@@ -42,7 +42,9 @@ Per `atomic-v4.md`: the **dedicated** atomic helpers (`add-atomic-heading`,
 `add-flexbox`, …) take **flat** values and wrap them into `$$type` props for you.
 
 The **universal** `add-atomic-widget` / `update-atomic-widget` depend on the plugin
-version: since **1.27.0** the save path coerces the whole tree, so flat values are
+version (read it from `server-info`; if that tool is absent the site is 1.28.0 or older,
+since it cannot be disabled where it exists): since **1.27.0** the save path coerces the
+whole tree, so flat values are
 wrapped there too; on **older builds** they wrote settings verbatim and flat values were
 silently saved as empty. Fetch the shape with `get-widget-schema` and build typed props
 by hand when the version is older or unknown. A direct `_elementor_data` patch never gets
