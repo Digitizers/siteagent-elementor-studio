@@ -30,7 +30,7 @@ engine once (atomic tools present ⇒ V4) and commit to one family for the whole
 | `add-video` (YouTube) | `add-atomic-youtube` | writes the `source` prop |
 | self-hosted video | `add-atomic-video` | |
 | `add-divider` | `add-atomic-divider` | |
-| **anything else** | `add-atomic-widget` / `update-atomic-widget` | universal escape hatch — **raw `$$type` settings, no auto-wrap** |
+| **anything else** | `add-atomic-widget` / `update-atomic-widget` | universal escape hatch — flat values coerced on plugin 1.27.0+, raw `$$type` on older builds |
 
 Structural tools (`get-page-structure`, `find-element`, `duplicate-element`,
 `move-element`, `remove-element`, `reorder-elements`, `update-element`) are engine-neutral
@@ -39,11 +39,17 @@ and work on both.
 ## The `$$type` envelope rule (cross-reference, don't re-derive)
 
 Per `atomic-v4.md`: the **dedicated** atomic helpers (`add-atomic-heading`,
-`add-flexbox`, …) take **flat** values and wrap them into `$$type` props for you. The
-**universal** `add-atomic-widget` / `update-atomic-widget` do **not** wrap — pass
-settings already in raw `$$type` shape (fetch it with `get-widget-schema`). Flat values
-sent to the universal tools are silently saved as empty. Prefer the dedicated helpers
-for everything they cover; use the universal tool only for atomic types without a helper.
+`add-flexbox`, …) take **flat** values and wrap them into `$$type` props for you.
+
+The **universal** `add-atomic-widget` / `update-atomic-widget` depend on the plugin
+version: since **1.27.0** the save path coerces the whole tree, so flat values are
+wrapped there too; on **older builds** they wrote settings verbatim and flat values were
+silently saved as empty. Fetch the shape with `get-widget-schema` and build typed props
+by hand when the version is older or unknown. A direct `_elementor_data` patch never gets
+a wrapper on any version.
+
+Prefer the dedicated helpers for everything they cover; use the universal tool only for
+atomic types without a helper.
 
 ## Styling parity: local styles vs. Global Classes
 
@@ -89,10 +95,11 @@ Then style:
   then `apply-global-class(class_id, post_id, element_id: hero_id)`.
 - **One-off?** pass the style params on the dedicated helper (they build the local
   `styles` map for you) **at creation**. For an atomic type without a dedicated helper,
-  create it with the universal **`add-atomic-widget`** (also creation-time and
-  style-capable) or apply an existing/new **Global Class** — do **not** try to add a
-  `styles` map with `update-atomic-widget`, which merges `settings` only and cannot write
-  the top-level `styles` map (you'd be left with a dangling `settings.classes` reference).
+  create it with the universal **`add-atomic-widget`**, or apply an existing/new **Global
+  Class**. To restyle an element that already exists, `update-atomic-widget` takes flat
+  style params on plugin **1.28.1+** and merges them into the base variant; on **older
+  builds** it merged `settings` only and could not write the `styles` map, so a style sent
+  there left a dangling `settings.classes` reference and rendered nothing.
 - **Responsive?** classic used `_tablet` / `_mobile` suffix keys; V4 uses **variants**
   with a `breakpoint` (`create-global-class` `variants`, or the styles-map variant meta).
   See the Responsive sections in `../SKILL.md` and `atomic-v4.md`.

@@ -18,7 +18,7 @@ persist on an atomic page, and atomic writes don't belong on a classic page.
 | Button | `add-button` | `add-atomic-button` |
 | Image | `add-image` | `add-atomic-image` |
 | SVG / video / divider | `add-icon` / `add-html` | `add-atomic-svg` / `add-atomic-youtube` / `add-atomic-video` / `add-atomic-divider` |
-| Anything else | `add-widget` | `add-atomic-widget` *(any atomic type; pass raw `$$type`-shaped settings — see note)* / `update-atomic-widget` |
+| Anything else | `add-widget` | `add-atomic-widget` *(any atomic type; flat values are coerced on plugin 1.27.0+, raw `$$type` on older builds — see note)* / `update-atomic-widget` |
 
 ### The atomic data model (what's different)
 
@@ -54,11 +54,12 @@ persist on an atomic page, and atomic writes don't belong on a classic page.
 ### How local styles actually attach — `settings.classes` + the `styles` map
 
 This is the wiring the creation helpers (`add-atomic-*` / `add-flexbox` / the universal
-`add-atomic-widget`) do for you — and the shape you hand-build only when creating an
-element with raw `$$type` settings. (`update-atomic-widget` can change which classes an
-existing element references via `settings.classes`, but **cannot** write the top-level
-`styles` map — see the note below; to add a *new* local style, recreate the element or use
-a Global Class.) An atomic element carries **two coupled pieces**:
+`add-atomic-widget`) do for you — and the shape you hand-build only when patching
+`_elementor_data` directly. (On plugin **1.28.1+** `update-atomic-widget` also writes the
+`styles` map: pass flat style params and it merges them into the element's base variant.
+On older builds it could only change which classes `settings.classes` referenced, which is
+why the notes below describe recreation or a Global Class as the way to restyle.) An
+atomic element carries **two coupled pieces**:
 
 1. **`settings.classes`** — a typed prop listing the class IDs the element wears:
    ```json
@@ -88,14 +89,21 @@ The **local `styles` map is built at element-creation time** — the `add-atomic
 style props you pass (typography, color, background, …) into the element's `styles` map and
 wire its id into `settings.classes` for you.
 
-> ⚠️ **`update-atomic-widget` writes `settings` only — it cannot write the `styles` map.** Its
-> executor merges through `update_element_settings`, so it updates `settings` (including the
-> `settings.classes` *reference list*) but has **no way to add or change the element's
-> top-level `styles` map**. To restyle a V4 element you therefore either (a) set the style at
-> creation via the `add-atomic-*` helpers, or (b) point `settings.classes` at an existing
-> **Global Class** (`apply-global-class` / `create-global-class`). Writing a class id into
-> `settings.classes` via `update-atomic-widget` with **no** matching global class and **no**
-> pre-existing local `styles` entry is a dangling reference that styles nothing.
+> **Restyling an existing element depends on the plugin version.**
+>
+> On **1.28.1+**, `update-atomic-widget` takes flat style params (`padding`, `width`,
+> `border_*`, `css_position`, `shadow_*`, typography, …) and merges them into the element's
+> base style variant, preserving props it wasn't asked to change and wiring the class into
+> `settings.classes`. `settings` still means CONTENT.
+>
+> ⚠️ On **older builds** it wrote `settings` only and had no way to touch the `styles` map,
+> so a padding sent through `settings` saved, reported success and rendered nothing. There,
+> restyle by (a) setting the style at creation via the `add-atomic-*` helpers, or (b)
+> pointing `settings.classes` at an existing **Global Class** (`apply-global-class` /
+> `create-global-class`).
+>
+> Either way: writing a class id into `settings.classes` with **no** matching global class
+> and **no** matching local `styles` entry is a dangling reference that styles nothing.
 
 ### Responsive on V4 — variants, not `_tablet`/`_mobile` suffixes
 
