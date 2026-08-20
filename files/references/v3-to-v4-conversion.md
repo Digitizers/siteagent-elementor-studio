@@ -99,8 +99,11 @@ Then style:
   create it with the universal **`add-atomic-widget`**, or apply an existing/new **Global
   Class**. To restyle an element that already exists, `update-atomic-widget` takes flat
   style params on plugin **1.28.1+** and merges them into the base variant; on **older
-  builds** it merged `settings` only and could not write the `styles` map, so a style sent
-  there left a dangling `settings.classes` reference and rendered nothing.
+  builds** it merged `settings` only and could not write the `styles` map, so a style param
+  sent there became an ordinary `settings` key that Elementor ignores: saved, reported
+  successful, rendered nothing. (That is a different failure from a **dangling class
+  reference**, which is what you get by writing a class id into `settings.classes` with no
+  matching local `styles` entry and no matching Global Class.)
 - **Responsive?** classic used `_tablet` / `_mobile` suffix keys; V4 uses **variants**
   with a `breakpoint` (`create-global-class` `variants`, or the styles-map variant meta).
   See the Responsive sections in `../SKILL.md` and `atomic-v4.md`.
