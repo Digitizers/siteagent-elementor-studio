@@ -360,10 +360,16 @@ I shipped two pages with this before noticing: 5 broken attributes on one, 51 on
 **Normalise at extraction, not at build time**, so no downstream fragment can carry it:
 
 ```python
+import re
+
+
+def _camel(m: "re.Match") -> str:
+    head, *rest = m.group(1).split("-")
+    return head + "".join(word.capitalize() for word in rest)
+
+
 def normalize_svg_attrs(markup: str) -> str:
-    return re.sub(r"sc-camel-([a-z][a-z0-9-]*)",
-                  lambda m: (lambda h, *r: h + "".join(w.capitalize() for w in r))(*m.group(1).split("-")),
-                  markup)
+    return re.sub(r"sc-camel-([a-z][a-z0-9-]*)", _camel, markup)
 ```
 
 Then audit what already shipped — the stored `_elementor_data` is just text:
