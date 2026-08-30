@@ -344,12 +344,18 @@ Worse than #17, because nothing looks broken. A bundler that serialises JSX thro
          sc-camel-repeat-count="indefinite"> <!-- repeatCount -->
 ```
 
-Browsers ignore unknown attributes silently. The consequences are invisible in a thumbnail and easy to ship:
+Browsers ignore unknown attributes silently, and **each lost attribute fails differently**. Don't expect one symptom — the dangerous ones are the animations that still move, just wrongly:
 
-- **`viewBox` lost** — the icon renders at raw user-unit size inside its `width`/`height` box, so a 24-unit glyph sits small and off-centre in a 30px frame. It still *looks like an icon*, which is why it survives review.
-- **The SMIL attributes lost** — `<animate>` / `<animateMotion>` have nothing to animate, so every animated SVG on the page is frozen. The page looks fine; it just isn't moving.
+| Lost | Effect |
+|---|---|
+| `viewBox` | The glyph renders at raw user-unit size inside its `width`/`height` box, so a 24-unit icon sits small and off-centre in a 30px frame. It still *looks like an icon*, which is why it survives review. |
+| `attributeName` on `<animate>` / `<animateTransform>` | **Required** — with no target, the element is inert. This is the only true freeze. |
+| `attributeName` on `<animateMotion>` | Not used by that element; it animates position along its `path` / `<mpath>`. Losing it costs nothing. |
+| `repeatCount="indefinite"` | Falls back to a single iteration: the animation **plays once and stops**. On a page you glance at during load, it looks like it works. |
+| `keyTimes` / `keyPoints` | Falls back to even distribution, so any hold-then-move choreography collapses into a uniform sweep. The motion is still there, just wrong. |
+| `calcMode` | Falls back to `linear` — except on `<animateMotion>`, whose default is `paced`. Pacing changes; nothing stops. |
 
-I shipped two pages with this before noticing: 5 broken attributes on one, 51 on the other.
+I shipped two pages with this before noticing: 5 broken attributes on one, 51 on the other. On the second, the 51 broke into 4 `<animate>` that were genuinely inert and 4 `<animateMotion>` that swept once at the wrong pacing and then stopped forever. **The second group is the one to design your check around** — a frozen page is obvious, a one-shot animation is not, so verifying "does it move?" on first load proves nothing. Re-check after the loop should have restarted.
 
 **Normalise at extraction, not at build time**, so no downstream fragment can carry it:
 
