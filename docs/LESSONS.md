@@ -332,6 +332,64 @@ grep -o '{{[^}]*}}' fragment.html
 
 Usually the *content* is clean and only the interactive shell is bound — so the panels can be lifted and only the controls rebuilt. Where a binding is a computed value (`pctA = (98.2 * e).toFixed(1)` — a count-up animation), find the source expression and substitute the final value.
 
+### 18. A design export can mangle camelCase SVG attributes
+
+Worse than #17, because nothing looks broken. A bundler that serialises JSX through a lowercasing HTML writer emits every camelCase SVG attribute in kebab form behind a prefix:
+
+```html
+<svg sc-camel-view-box="0 0 24 24">          <!-- viewBox -->
+<animate sc-camel-attribute-name="r"         <!-- attributeName -->
+         sc-camel-key-times="0;1"            <!-- keyTimes -->
+         sc-camel-calc-mode="linear"         <!-- calcMode -->
+         sc-camel-repeat-count="indefinite"> <!-- repeatCount -->
+```
+
+Browsers ignore unknown attributes silently, and **each lost attribute fails differently**. Don't expect one symptom — the dangerous ones are the animations that still move, just wrongly:
+
+| Lost | Effect |
+|---|---|
+| `viewBox` | The glyph renders at raw user-unit size inside its `width`/`height` box, so a 24-unit icon sits small and off-centre in a 30px frame. It still *looks like an icon*, which is why it survives review. |
+| `attributeName` on `<animate>` / `<animateTransform>` | **Required** — with no target, the element is inert. This is the only true freeze. |
+| `attributeName` on `<animateMotion>` | Not used by that element; it animates position along its `path` / `<mpath>`. Losing it costs nothing. |
+| `repeatCount="indefinite"` | Falls back to a single iteration: the animation **plays once and stops**. On a page you glance at during load, it looks like it works. |
+| `keyTimes` / `keyPoints` | Falls back to even distribution, so any hold-then-move choreography collapses into a uniform sweep. The motion is still there, just wrong. |
+| `calcMode` | Falls back to `linear` — except on `<animateMotion>`, whose default is `paced`. Pacing changes; nothing stops. |
+
+I shipped two pages with this before noticing: 5 broken attributes on one, 51 on the other. On the second, the 51 broke into 4 `<animate>` that were genuinely inert and 4 `<animateMotion>` that swept once at the wrong pacing and then stopped forever. **The second group is the one to design your check around** — a frozen page is obvious, a one-shot animation is not, so verifying "does it move?" on first load proves nothing. Re-check after the loop should have restarted.
+
+**Normalise at extraction, not at build time**, so no downstream fragment can carry it:
+
+```python
+import re
+
+
+def _camel(m: "re.Match") -> str:
+    head, *rest = m.group(1).split("-")
+    return head + "".join(word.capitalize() for word in rest)
+
+
+def normalize_svg_attrs(markup: str) -> str:
+    return re.sub(r"sc-camel-([a-z][a-z0-9-]*)", _camel, markup)
+```
+
+Then audit what already shipped — the stored `_elementor_data` is just text:
+
+```bash
+# -c counts matching LINES, and _elementor_data is one long line: it reports 1
+# for a page with 51 mangled attributes, and still 1 after you fix 50 of them.
+# Count occurrences.
+wp post meta get <id> _elementor_data | grep -o 'sc-camel' | wc -l
+
+# and to see which attributes, not just how many:
+wp post meta get <id> _elementor_data | grep -oE 'sc-camel-[a-z-]+' | sort | uniq -c
+```
+
+That `grep -c` trap applies to every audit in this file that greps minified or
+single-line output — page CSS, `_elementor_data`, an exported JSON blob. Reach for
+`grep -o … | wc -l` by default there, and keep `-c` for real multi-line files.
+
+Generalise the check: **grep every export for attributes the HTML parser would not have produced**, not only this one prefix. `grep -oE '\b[a-z]+-[a-z-]+=' fragment.html | sort -u` and eyeball anything that should have been camelCase.
+
 ---
 
 ## Layout decision: native widgets vs HTML widget
@@ -494,6 +552,9 @@ The `$missing` check above is the habit that pays for itself: without it a typo'
 - **Check the provenance of reference images.** A `crops/` folder in the handover turned out to be screenshots of a *different company's* site. Everything measured from it was wrong.
 - **Search the markup by byte range, not by string.** Exported headings are split across styled spans, so `find("Get solid in three steps")` returns nothing while the text is plainly on screen. Build a section index of byte offsets once, then slice.
 - **Copy beats design.** When the client's content document and the design disagree, the document wins — and when there are two revisions of it, confirm which is authoritative before implementing either.
+- **A design *system* export outranks every page export.** If the handover later gains a "Design System" page — named colour roles, a type scale, a radius scale, a page order — that document is a brand guide and takes precedence over anything measured off a page. Re-extract when it lands, mark those values `stated`, and record every place the already-built pages disagree as drift rather than silently "fixing" either side. On this build the system arrived after three pages had shipped and contradicted them in eight places, two of them explicit prohibitions ("shadows are never tinted", "no entrance animations on scroll").
+- **Write the page-assembly script parameterised the first time.** I wrote `assemble.php` hardcoded to one post id, then copied it to `assemble935.php` changing two lines, and by the third page had to write the generic version anyway. Page two is not the exception — it is the signal.
+- **Match a widget for patching by a marker unique to *that* widget.** Re-pushing one HTML widget's markup by searching its content is the cheap way to land a small change without regenerating a page. But a `<style>` block in a *different* widget can contain the same CSS text you were matching on — `grid-template-columns:repeat(3,1fr)` matched both the related-products grid and the hero's stylesheet. Make the patch script assert **exactly one** match and refuse to write otherwise; that assertion is what caught it.
 
 Orbiting badges, overlapping cards, and off-grid decoration have no *flex-flow* equivalent, but they are still expressible — the route depends on the tier and the engine, and none of them is "impossible":
 
