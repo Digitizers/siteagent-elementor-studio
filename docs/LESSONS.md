@@ -369,8 +369,18 @@ def normalize_svg_attrs(markup: str) -> str:
 Then audit what already shipped — the stored `_elementor_data` is just text:
 
 ```bash
-wp post meta get <id> _elementor_data | grep -c 'sc-camel'
+# -c counts matching LINES, and _elementor_data is one long line: it reports 1
+# for a page with 51 mangled attributes, and still 1 after you fix 50 of them.
+# Count occurrences.
+wp post meta get <id> _elementor_data | grep -o 'sc-camel' | wc -l
+
+# and to see which attributes, not just how many:
+wp post meta get <id> _elementor_data | grep -oE 'sc-camel-[a-z-]+' | sort | uniq -c
 ```
+
+That `grep -c` trap applies to every audit in this file that greps minified or
+single-line output — page CSS, `_elementor_data`, an exported JSON blob. Reach for
+`grep -o … | wc -l` by default there, and keep `-c` for real multi-line files.
 
 Generalise the check: **grep every export for attributes the HTML parser would not have produced**, not only this one prefix. `grep -oE '\b[a-z]+-[a-z-]+=' fragment.html | sort -u` and eyeball anything that should have been camelCase.
 
