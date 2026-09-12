@@ -35,6 +35,53 @@ ask()   { printf "${BOLD}? %s${RESET} " "$*"; }
 
 abort() { fail "$1"; exit 1; }
 
+# ---- pure helpers (arg/stdin based; unit-tested via --self-test-fn) ----------
+# Same convention as new-client.sh, deliberately inline so this stays one
+# droppable file.
+
+# arg1: site URL -> host, lowercased, port and path stripped
+url_host(){ printf '%s' "${1:-}" | sed -E 's#^https?://##; s#[:/].*$##' | tr '[:upper:]' '[:lower:]'; }
+
+# arg1: host -> "yes" when it is a local dev host (no wire to sniff)
+is_local_host(){
+  case "${1:-}" in
+    localhost|127.0.0.1|0.0.0.0|::1|*.local|*.test|*.localhost) printf 'yes' ;;
+    *) printf 'no' ;;
+  esac
+}
+
+# arg1: site URL; env WP_ALLOW_HTTP (comma-separated hosts) ->
+#   "ok"       https, nothing to decide
+#   "local"    plaintext to a local dev host
+#   "named"    plaintext to a host the caller named
+#   "refused"  plaintext to anything else
+# A live run sends a reusable application password on every request, so this is
+# the same rule as wordpress-api-pro's WP_ALLOW_HTTP: name the host or use
+# https. A blanket value cannot work here - "1" is simply not a hostname.
+http_verdict(){
+  url="${1:-}"
+  case "$url" in http://*) ;; *) printf 'ok'; return ;; esac
+  host=$(url_host "$url")
+  [ "$(is_local_host "$host")" = "yes" ] && { printf 'local'; return; }
+  allowed=",$(printf '%s' "${WP_ALLOW_HTTP:-}" | tr -d ' ' | tr '[:upper:]' '[:lower:]'),"
+  case "$allowed" in *",$host,"*) printf 'named' ;; *) printf 'refused' ;; esac
+}
+
+# stdin -> same JSON with the Basic credential replaced by a placeholder
+redact_basic_auth(){ sed -E 's#("Authorization": "Basic )[^"]*#\1<base64 of WP_USERNAME:WP_APP_PASSWORD>#'; }
+
+# arg1: file -> sha256 hex, using whatever the machine has
+sha256_of(){
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  else python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"
+  fi
+}
+
+# Hidden test hook: `setup-elementor-mcp.sh --self-test-fn <fn> [args...]` runs
+# one helper and exits. Never touches the network, never prompts.
+if [ "${1:-}" = "--self-test-fn" ]; then shift; fn="$1"; shift || true; "$fn" "$@"; exit $?; fi
+
 # ---- prereq check ------------------------------------------------------------
 need() { command -v "$1" >/dev/null 2>&1 || abort "Missing required command: $1"; }
 need curl
@@ -210,6 +257,19 @@ else
   read -r SITE_URL
   SITE_URL="${SITE_URL%/}"
   [[ "$SITE_URL" =~ ^https?:// ]] || abort "URL must start with http:// or https://"
+  # A live-host run sends a reusable application password on every request, so
+  # plaintext http is refused unless the host is a local dev host or the caller
+  # names it explicitly - same rule, and the same reasoning, as
+  # wordpress-api-pro's WP_ALLOW_HTTP.
+  case "$(http_verdict "$SITE_URL")" in
+    refused)
+      abort "Refusing http:// for $(url_host "$SITE_URL") — the application password would travel unencrypted.
+  Use https://, or name this host explicitly: WP_ALLOW_HTTP=$(url_host "$SITE_URL") bash setup-elementor-mcp.sh"
+      ;;
+    named)
+      warn "Sending credentials over plaintext http to $(url_host "$SITE_URL") (WP_ALLOW_HTTP names it)."
+      ;;
+  esac
   ok "Site URL:   $SITE_URL"
 fi
 
@@ -690,15 +750,48 @@ if [ "$SKIP_MCP_INSTALL" = "no" ]; then
     EM_RELEASE_API="https://api.github.com/repos/Digitizers/elementor-mcp/releases/latest"
     info "Downloading the elementor-mcp fork (bundles the MCP Adapter, latest release from the trusted Digitizers repo over HTTPS; set EMCP_PIN_VERSION to pin a tag)..."
   fi
-  EM_ZIPBALL=$(curl -s "$EM_RELEASE_API" \
+  # Take the asset's sha256 from the SAME API response as its URL, so a
+  # download mangled or swapped in transit (proxy, CDN, partial transfer) is
+  # caught before the zip is installed onto a WordPress site.
+  #
+  # Be clear about what this is NOT: the digest travels with the URL, so it
+  # proves integrity, not provenance. A compromised release would publish a
+  # matching digest for a malicious asset. Export EMCP_EXPECTED_SHA256 with a
+  # digest obtained out of band for a real provenance check.
+  EM_RELEASE_JSON=$(curl -s "$EM_RELEASE_API")
+  EM_ZIPBALL=$(printf '%s' "$EM_RELEASE_JSON" \
     | python3 -c "$JQ_LENIENT_PY"'
 import sys
 d = _load(sys.stdin.read())
 a = [a for a in d.get("assets",[]) if a["name"].endswith(".zip")]
 print(a[0]["browser_download_url"] if a else d.get("zipball_url",""))
 ')
+  EM_DIGEST=$(printf '%s' "$EM_RELEASE_JSON" \
+    | python3 -c "$JQ_LENIENT_PY"'
+import sys
+d = _load(sys.stdin.read())
+a = [a for a in d.get("assets",[]) if a["name"].endswith(".zip")]
+print((a[0].get("digest") or "").replace("sha256:","") if a else "")
+')
   [ -n "$EM_ZIPBALL" ] || abort "Could not fetch elementor-mcp download URL.${EMCP_PIN_VERSION:+ Check that EMCP_PIN_VERSION=$EMCP_PIN_VERSION is a real release tag.}"
   curl -sL -o "$WORK/elementor-mcp-src.zip" "$EM_ZIPBALL" || abort "elementor-mcp download failed."
+
+  # Verify before unzipping: the archive is about to be installed and activated
+  # as PHP on a WordPress site, so a bad one must never reach the repack step.
+  EM_EXPECTED="${EMCP_EXPECTED_SHA256:-$EM_DIGEST}"
+  if [ -n "$EM_EXPECTED" ]; then
+    EM_ACTUAL=$(sha256_of "$WORK/elementor-mcp-src.zip")
+    if [ "$EM_ACTUAL" != "$EM_EXPECTED" ]; then
+      abort "elementor-mcp download failed integrity check.
+    expected sha256: $EM_EXPECTED
+    got sha256:      $EM_ACTUAL
+  Nothing was installed. Re-run; if it persists, the download is being tampered with or the release was replaced."
+    fi
+    ok "Download verified (sha256 ${EM_ACTUAL:0:12}…)${EMCP_EXPECTED_SHA256:+ against EMCP_EXPECTED_SHA256}"
+  else
+    warn "This release publishes no sha256 for its asset — installing an UNVERIFIED download."
+    info "  Pin it instead: EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> ./setup-elementor-mcp.sh"
+  fi
 
   # Repack with clean folder name (zipballs have ugly hash-suffixed dirs)
   ( cd "$WORK" && unzip -q elementor-mcp-src.zip )
@@ -897,8 +990,12 @@ JSON
 )
 
 if [ "${SKIP_WRITE:-0}" != "1" ]; then
+  # Create it 0600 BEFORE the credential lands in it: writing first and chmod-ing
+  # after leaves a window where the file is world-readable on a shared machine.
+  ( umask 077; : > "$MCP_FILE" )
+  chmod 600 "$MCP_FILE" 2>/dev/null || warn "Could not chmod 600 $MCP_FILE — check its permissions yourself."
   printf "%s\n" "$NEW_CONFIG" > "$MCP_FILE"
-  ok "Wrote $MCP_FILE"
+  ok "Wrote $MCP_FILE (mode 600)"
 
   # .mcp.json embeds a reusable Basic-Auth credential (base64 of
   # user:app-password). If we're inside a git repo, make sure it can't be
@@ -930,10 +1027,13 @@ if [ "${SKIP_WRITE:-0}" != "1" ]; then
   info "    (WP Admin → Users → Profile → Application Passwords → Revoke)."
 elif [ "${TRACKED_PLACEHOLDER:-0}" != "1" ]; then
   echo
-  info "Suggested config:"
-  echo "$NEW_CONFIG" | sed 's/^/      /'
-  warn "SECURITY: this config embeds a reusable WordPress credential — keep it"
-  info "  out of version control and rotate/revoke the Application Password after use."
+  info "Suggested config (the credential is REDACTED — this goes to your terminal,"
+  info "scrollback and any screen share, so the real value is not printed):"
+  printf '%s\n' "$NEW_CONFIG" | redact_basic_auth | sed 's/^/      /'
+  info "  Fill it in with: printf '%s:%s' \"\$WP_USERNAME\" \"\$WP_APP_PASSWORD\" | base64"
+  warn "SECURITY: that config embeds a reusable WordPress credential — write it"
+  info "  with mode 600, keep it out of version control, and rotate/revoke the"
+  info "  Application Password after use."
 fi
 
 # ---- final instructions ------------------------------------------------------

@@ -5,6 +5,36 @@ All notable changes to the siteagent-elementor-studio skill kit are documented h
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the kit is versioned via the `version:` field in `files/SKILL.md`.
 
+## 1.5.0 — 2026-09-13
+
+Security hardening of `setup-elementor-mcp.sh`, from the ClawHub audit of 1.4.0.
+AIG rated three of these High.
+
+- **The downloaded plugin zip is verified before it is unpacked.** The script
+  installs and activates that archive as PHP on a WordPress site, so it now
+  compares it against the sha256 the release API reports for the asset and
+  aborts on a mismatch, with nothing installed. Be clear about what this is and
+  is not: the digest travels in the same response as the URL, so it proves
+  **integrity, not provenance** — a compromised release would publish a matching
+  digest for a malicious asset. `EMCP_EXPECTED_SHA256` takes a digest obtained
+  out of band, which is the provenance check. A release that publishes no digest
+  is installed with an explicit warning rather than silently.
+- **Plaintext `http://` to a non-local host is refused.** A live run sends a
+  reusable application password on every request. `WP_ALLOW_HTTP=host` (comma
+  separated) permits named hosts; localhost and `.local` / `.test` /
+  `.localhost` are exempt as before. Same rule, same reasoning, as
+  wordpress-api-pro 3.9.5.
+- **`.mcp.json` is created mode 600 before the credential is written to it.**
+  Writing first and fixing permissions afterwards leaves a window where the file
+  is world-readable on a shared machine.
+- **The suggested config printed when the file is not written no longer contains
+  the credential.** It went to the terminal, the scrollback and any screen share;
+  the Basic value is now replaced by a placeholder with the command to produce it.
+
+The four helpers behind these guards are unit-tested through the script's
+`--self-test-fn` hook, the same convention `new-client.sh` uses (12 new cases in
+`tests/setup-guards.bats`).
+
 ## 1.4.0 — 2026-07-21
 
 - **Committed `.mcp.json`** (secrets as placeholders only) — the `elementor` connection now
