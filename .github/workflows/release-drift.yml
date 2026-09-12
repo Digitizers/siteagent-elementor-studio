@@ -1,0 +1,150 @@
+name: Release drift
+
+# The ClawHub publish workflow runs only on a published GitHub Release. A version
+# bump merged to main without one leaves ClawHub serving the PREVIOUS version,
+# silently — hostinger-mcp and siteagent-elementor-studio each sat two months
+# behind that way, and it was noticed by chance in the ClawHub UI.
+#
+# This fails on main when SKILL.md's version has no matching release, so the
+# gap shows up as a red check instead of as stale published content.
+#
+# It enforces the MECHANISM, not the outcome: a skill published to ClawHub by
+# hand still reads as drift here until a release exists. That is deliberate —
+# the release notes are where "what changed" is supposed to live.
+#
+# It does not run on pull requests. The PR that bumps the version legitimately
+# has no release yet; the release is cut after the merge.
+#
+# The release trigger matters: without it, the run that goes red on the version
+# bump has nothing to clear it, because publishing a release moves no branch.
+# main would stay red until the next unrelated push or the weekly schedule.
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  # Daily belt-and-braces: it catches a repo that goes quiet, and a release
+  # published from a path that emits no event at all.
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # On a release (or workflow_run) event GITHUB_SHA is the TAGGED commit, so a
+  # green run lands on the tag and cannot replace the red check sitting on
+  # main's head. Checking out main fixes which FILES are read; it cannot move
+  # the run's own SHA. So this path does not check anything - it re-dispatches
+  # the workflow against main, and that run reports on main's head commit.
+  #
+  # This works with the repository GITHUB_TOKEN: GitHub's recursion suppression
+  # for token-triggered events explicitly EXEMPTS workflow_dispatch and
+  # repository_dispatch. No PAT is needed.
+  redispatch:
+    name: Re-run against main
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch the check against main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release-drift.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+  check:
+    name: SKILL.md version has a release
+    # The dispatched run lands here. Guarding on the event name is what keeps
+    # the two jobs from calling each other forever.
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    env:
+      SKILL_DIR: "files"
+    steps:
+      # Always main, never the event's own ref. A release-triggered run checks
+      # out the TAG by default, so publishing an older draft - or publishing
+      # after main has moved on - would read that tag's SKILL.md and report on
+      # a version nobody is asking about. The invariant is about main.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Compare SKILL.md with the published releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # '|| true' guards the pipeline: under pipefail a non-matching grep
+          # would abort the step before the error message below could explain why.
+          VERSION=$(grep -m1 '^version:' "$SKILL_DIR/SKILL.md" 2>/dev/null \
+            | sed 's/^version:[[:space:]]*//' | tr -d '"' | tr -d "'" | xargs || true)
+          if [ -z "$VERSION" ]; then
+            echo "::error::No 'version:' found in $SKILL_DIR/SKILL.md"
+            exit 1
+          fi
+          # A DRAFT release is the trap here: "gh release view" succeeds for one,
+          # but publish-clawhub.yml triggers on "release: published", so a draft
+          # would turn this check green while ClawHub keeps serving the old
+          # version - the exact failure this check exists to catch. A prerelease
+          # is fine; publishing one does fire the release event.
+          # A lookup that FAILED is not the same as a release that is ABSENT.
+          # Collapsing both into "missing" would report "cut the release" after
+          # a transient API blip, sending someone to create a release that
+          # already exists.
+          ERR=$(mktemp)
+          set +e
+          DRAFT=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" \
+            --jq '.draft' 2>"$ERR")
+          RC=$?
+          set -e
+          if [ "$RC" -eq 0 ]; then
+            STATE=$DRAFT
+          elif grep -qiE '404|not found' "$ERR"; then
+            STATE=missing
+          else
+            echo "::error::Could not query releases - this is a lookup failure, not a missing release:"
+            cat "$ERR" >&2
+            exit 1
+          fi
+          case "$STATE" in
+            false)
+              # A published v$VERSION is not enough: the TAG may point at an
+              # older commit - a draft cut before the bump merged, say. Since
+              # publish-clawhub.yml checks out the tagged commit and reads ITS
+              # SKILL.md, that tag would publish the older version (or fail as
+              # "already exists") while main stays unpublished, with this check
+              # green. So compare the version AT THE TAG with main's.
+              TAG_ERR=$(mktemp)
+              set +e
+              TAG_FILE=$(gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$SKILL_DIR/SKILL.md?ref=v$VERSION" \
+                --jq '.content' 2>"$TAG_ERR")
+              TAG_RC=$?
+              set -e
+              if [ "$TAG_RC" -ne 0 ]; then
+                echo "::error::v$VERSION is published, but $SKILL_DIR/SKILL.md could not be read at that tag:"
+                cat "$TAG_ERR" >&2
+                exit 1
+              fi
+              TAG_VERSION=$(printf '%s' "$TAG_FILE" | tr -d '\n' | base64 -d \
+                | grep -m1 '^version:' | sed 's/^version:[[:space:]]*//' \
+                | tr -d '"' | tr -d "'" | xargs || true)
+              if [ "$TAG_VERSION" != "$VERSION" ]; then
+                echo "::error::main is at $VERSION, but tag v$VERSION points at a commit whose SKILL.md says ${TAG_VERSION:-<none>}. ClawHub would publish that one. Re-cut the tag on the commit that carries $VERSION."
+                exit 1
+              fi
+              echo "SKILL.md is at $VERSION, v$VERSION is published, and the tag carries $TAG_VERSION."
+              exit 0
+              ;;
+            true)
+              echo "::error::v$VERSION exists but is still a DRAFT. Nothing publishes to ClawHub until it is published: gh release edit v$VERSION --draft=false"
+              exit 1
+              ;;
+            *)
+              echo "::error::$SKILL_DIR/SKILL.md is at $VERSION, but no v$VERSION release exists. ClawHub is still serving the previously released version. Cut it with: gh release create v$VERSION --target main"
+              exit 1
+              ;;
+          esac
