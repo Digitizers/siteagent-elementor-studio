@@ -79,6 +79,25 @@ http_verdict(){
 # stdin -> same JSON with the Basic credential replaced by a placeholder
 redact_basic_auth(){ sed -E 's#("Authorization": "Basic )[^"]*#\1<base64 of WP_USERNAME:WP_APP_PASSWORD>#'; }
 
+# arg1: target path; arg2: content -> writes it 0600, ATOMICALLY.
+# Exit codes: 0 ok | 2 cannot create temp | 3 cannot secure temp | 4 write
+# failed | 5 rename failed. The target is only ever replaced by a file that is
+# already mode 600 and already holds the content: truncating the target first
+# and checking afterwards destroys the user's existing config on any failure.
+write_secret_file(){
+  _target="${1:-}"; _content="${2:-}"
+  _dir=$(dirname "$_target")
+  _tmp=$(mktemp "$_dir/.mcp.json.XXXXXX" 2>/dev/null) || return 2
+  chmod 600 "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 3; }
+  case "$(ls -l "$_tmp" 2>/dev/null | cut -c1-10)" in
+    -rw-------*) ;;
+    *) rm -f "$_tmp"; return 3 ;;
+  esac
+  printf '%s\n' "$_content" > "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 4; }
+  mv -f "$_tmp" "$_target" 2>/dev/null || { rm -f "$_tmp"; return 5; }
+  return 0
+}
+
 # arg1: file -> sha256 hex, using whatever the machine has
 sha256_of(){
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
@@ -1001,22 +1020,20 @@ JSON
 if [ "${SKIP_WRITE:-0}" != "1" ]; then
   # Create it 0600 BEFORE the credential lands in it: writing first and chmod-ing
   # after leaves a window where the file is world-readable on a shared machine.
-  ( umask 077; : > "$MCP_FILE" )
-  # Refuse rather than warn: the next line writes a reusable credential, and an
-  # existing file owned by someone else (or a filesystem with no permission
-  # bits) would keep whatever mode it already had. Warning and writing anyway
-  # puts the secret in a readable file and calls it a caveat.
-  if ! chmod 600 "$MCP_FILE" 2>/dev/null; then
-    abort "Refusing to write credentials to $MCP_FILE — could not set mode 600 on it.
-  It may be owned by another user, or on a filesystem without permission bits.
-  Move to a directory you own (or remove that file) and re-run."
-  fi
-  MCP_MODE=$(ls -l "$MCP_FILE" 2>/dev/null | cut -c1-10)
-  case "$MCP_MODE" in
-    -rw-------*) ;;
-    *) abort "Refusing to write credentials to $MCP_FILE — its mode is ${MCP_MODE:-unknown}, not 600." ;;
+  # Written through a 0600 temp file and renamed into place, so the credential
+  # is never in a readable file and an existing config survives any failure.
+  write_secret_file "$MCP_FILE" "$NEW_CONFIG"
+  case $? in
+    0) ;;
+    2) abort "Refusing to write credentials — could not create a temp file in $PROJECT_DIR.
+  Run this from a directory you can write to." ;;
+    3) abort "Refusing to write credentials — could not secure the file at mode 600.
+  This filesystem may not carry permission bits (a mounted share, some FAT/exFAT volumes).
+  Use a local directory you own. Your existing $MCP_FILE was left untouched." ;;
+    4) abort "Refusing to write credentials — writing the config failed. Your existing $MCP_FILE was left untouched." ;;
+    5) abort "Refusing to write credentials — could not replace $MCP_FILE.
+  It may be owned by another user, or the directory may not be writable. The existing file was left untouched." ;;
   esac
-  printf "%s\n" "$NEW_CONFIG" > "$MCP_FILE"
   ok "Wrote $MCP_FILE (mode 600)"
 
   # .mcp.json embeds a reusable Basic-Auth credential (base64 of

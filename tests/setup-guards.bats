@@ -102,3 +102,40 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   WP_ALLOW_HTTP="2001:db8::1" fn http_verdict "http://[2001:db8::1]:8080/"
   [ "$output" = "named" ]
 }
+
+# ---- write_secret_file (Codex, PR #32): truncating first destroyed the config -
+@test "the credential file lands at mode 600 with the right content" {
+  target="$BATS_TEST_TMPDIR/.mcp.json"
+  fn write_secret_file "$target" '{"secret":"x"}'
+  [ "$status" -eq 0 ]
+  [ "$(cat "$target")" = '{"secret":"x"}' ]
+  [[ "$(ls -l "$target" | cut -c1-10)" == "-rw-------"* ]]
+}
+
+@test "an existing world-readable file is replaced, not left readable" {
+  target="$BATS_TEST_TMPDIR/.mcp.json"
+  printf 'OLD\n' > "$target"; chmod 644 "$target"
+  fn write_secret_file "$target" '{"secret":"x"}'
+  [ "$status" -eq 0 ]
+  [[ "$(ls -l "$target" | cut -c1-10)" == "-rw-------"* ]]
+}
+
+@test "an existing config survives when the write cannot be secured" {
+  dir="$BATS_TEST_TMPDIR/ro"; mkdir -p "$dir"
+  target="$dir/.mcp.json"
+  printf 'KEEP ME\n' > "$target"
+  chmod 555 "$dir"
+  fn write_secret_file "$target" '{"secret":"x"}'
+  chmod 755 "$dir"
+  [ "$status" -ne 0 ]
+  [ "$(cat "$target")" = "KEEP ME" ]
+}
+
+@test "no temp file is left behind on failure" {
+  dir="$BATS_TEST_TMPDIR/ro2"; mkdir -p "$dir"
+  printf 'KEEP\n' > "$dir/.mcp.json"; chmod 555 "$dir"
+  fn write_secret_file "$dir/.mcp.json" '{"secret":"x"}'
+  chmod 755 "$dir"
+  [ "$(find "$dir" -name '.mcp.json.*' | wc -l | tr -d ' ')" = "0" ]
+}
+
