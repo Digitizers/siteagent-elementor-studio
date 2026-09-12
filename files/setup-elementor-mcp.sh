@@ -109,7 +109,14 @@ write_secret_file(){
     _who="${USERNAME:-$(whoami 2>/dev/null)}"
     [ -n "$_who" ] || { rm -f "$_tmp"; return 6; }
     # Break inheritance and grant only this user - before the secret is written.
-    icacls "$_win" /inheritance:r /grant:r "${_who}:F" >/dev/null 2>&1 \
+    #
+    # MSYS_NO_PATHCONV / MSYS2_ARG_CONV_EXCL are load-bearing: icacls is a
+    # native Windows program, so Git Bash rewrites slash-prefixed arguments as
+    # paths before launching it, turning /inheritance:r into something like
+    # C:/Program Files/Git/inheritance:r. The ACL call then fails - on the one
+    # platform this branch exists to serve.
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+      icacls "$_win" /inheritance:r /grant:r "${_who}:F" >/dev/null 2>&1 \
       || { rm -f "$_tmp"; return 6; }
   else
     chmod 600 "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 3; }

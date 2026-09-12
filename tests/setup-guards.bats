@@ -160,3 +160,14 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   [ -n "$posix_line" ] && [ -n "$else_line" ] && [ "$posix_line" -gt "$else_line" ]
 }
 
+@test "the icacls call is shielded from MSYS argument conversion" {
+  # Git Bash rewrites /inheritance:r into a Windows path before launching a
+  # native binary, so the ACL call fails without these guards (Codex, PR #32).
+  run bash -c "sed -n '/^write_secret_file()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"MSYS_NO_PATHCONV=1"* ]]
+  [[ "$output" == *"MSYS2_ARG_CONV_EXCL"* ]]
+  # and the switches must still be single-slash: the env guards replace the
+  # double-slash trick rather than combining with it
+  [[ "$output" == *"icacls \"\$_win\" /inheritance:r /grant:r"* ]]
+}
+
