@@ -40,7 +40,16 @@ abort() { fail "$1"; exit 1; }
 # droppable file.
 
 # arg1: site URL -> host, lowercased, port and path stripped
-url_host(){ printf '%s' "${1:-}" | sed -E 's#^https?://##; s#[:/].*$##' | tr '[:upper:]' '[:lower:]'; }
+url_host(){
+  # A bracketed IPv6 literal (http://[::1]:8080/) must not be cut at its first
+  # colon - that returned "[", so ::1 stopped being recognised as loopback and
+  # a legitimate local URL was refused.
+  _u=$(printf '%s' "${1:-}" | sed -E 's#^https?://##')
+  case "$_u" in
+    \[*) printf '%s' "${_u#[}" | sed -E 's#\].*$##' | tr '[:upper:]' '[:lower:]' ;;
+    *)   printf '%s' "$_u"      | sed -E 's#[:/].*$##' | tr '[:upper:]' '[:lower:]' ;;
+  esac
+}
 
 # arg1: host -> "yes" when it is a local dev host (no wire to sniff)
 is_local_host(){
@@ -993,7 +1002,20 @@ if [ "${SKIP_WRITE:-0}" != "1" ]; then
   # Create it 0600 BEFORE the credential lands in it: writing first and chmod-ing
   # after leaves a window where the file is world-readable on a shared machine.
   ( umask 077; : > "$MCP_FILE" )
-  chmod 600 "$MCP_FILE" 2>/dev/null || warn "Could not chmod 600 $MCP_FILE — check its permissions yourself."
+  # Refuse rather than warn: the next line writes a reusable credential, and an
+  # existing file owned by someone else (or a filesystem with no permission
+  # bits) would keep whatever mode it already had. Warning and writing anyway
+  # puts the secret in a readable file and calls it a caveat.
+  if ! chmod 600 "$MCP_FILE" 2>/dev/null; then
+    abort "Refusing to write credentials to $MCP_FILE — could not set mode 600 on it.
+  It may be owned by another user, or on a filesystem without permission bits.
+  Move to a directory you own (or remove that file) and re-run."
+  fi
+  MCP_MODE=$(ls -l "$MCP_FILE" 2>/dev/null | cut -c1-10)
+  case "$MCP_MODE" in
+    -rw-------*) ;;
+    *) abort "Refusing to write credentials to $MCP_FILE — its mode is ${MCP_MODE:-unknown}, not 600." ;;
+  esac
   printf "%s\n" "$NEW_CONFIG" > "$MCP_FILE"
   ok "Wrote $MCP_FILE (mode 600)"
 
@@ -1030,7 +1052,9 @@ elif [ "${TRACKED_PLACEHOLDER:-0}" != "1" ]; then
   info "Suggested config (the credential is REDACTED — this goes to your terminal,"
   info "scrollback and any screen share, so the real value is not printed):"
   printf '%s\n' "$NEW_CONFIG" | redact_basic_auth | sed 's/^/      /'
-  info "  Fill it in with: printf '%s:%s' \"\$WP_USERNAME\" \"\$WP_APP_PASSWORD\" | base64"
+  info "  Produce the value with (it will prompt for the password, so it stays"
+  info "  out of your shell history):"
+  info "      printf '%s:%s' '${WP_USER}' \"\$(read -rs -p 'app password: ' p; echo \"\$p\")\" | base64"
   warn "SECURITY: that config embeds a reusable WordPress credential — write it"
   info "  with mode 600, keep it out of version control, and rotate/revoke the"
   info "  Application Password after use."

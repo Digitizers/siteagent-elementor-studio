@@ -82,3 +82,23 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   fn sha256_of "$BATS_TEST_TMPDIR/b"
   [ "$output" != "$first" ]
 }
+
+# ---- IPv6 literals (Codex, PR #32): cutting at the first colon returned "[" ---
+@test "a bracketed IPv6 loopback is recognised, not truncated" {
+  fn url_host "http://[::1]:8080/wp-json/"
+  [ "$output" = "::1" ]
+  fn http_verdict "http://[::1]:8080/wp-json/"
+  [ "$output" = "local" ]
+}
+
+@test "a public IPv6 literal is still refused" {
+  fn url_host "http://[2001:db8::1]/"
+  [ "$output" = "2001:db8::1" ]
+  fn http_verdict "http://[2001:db8::1]/"
+  [ "$output" = "refused" ]
+}
+
+@test "a named IPv6 host can be allowed like any other" {
+  WP_ALLOW_HTTP="2001:db8::1" fn http_verdict "http://[2001:db8::1]:8080/"
+  [ "$output" = "named" ]
+}
