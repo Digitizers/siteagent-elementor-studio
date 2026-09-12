@@ -14,10 +14,16 @@ name: Release drift
 #
 # It does not run on pull requests. The PR that bumps the version legitimately
 # has no release yet; the release is cut after the merge.
+#
+# The release trigger matters: without it, the run that goes red on the version
+# bump has nothing to clear it, because publishing a release moves no branch.
+# main would stay red until the next unrelated push or the weekly schedule.
 
 on:
   push:
     branches: [main]
+  release:
+    types: [published]
   schedule:
     - cron: "0 9 * * 1"
   workflow_dispatch:
@@ -47,9 +53,24 @@ jobs:
             echo "::error::No 'version:' found in $SKILL_DIR/SKILL.md"
             exit 1
           fi
-          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "SKILL.md is at $VERSION and v$VERSION is released."
-            exit 0
-          fi
-          echo "::error::$SKILL_DIR/SKILL.md is at $VERSION, but no v$VERSION release exists. ClawHub is still serving the previously released version. Cut it with: gh release create v$VERSION --target main"
-          exit 1
+          # A DRAFT release is the trap here: "gh release view" succeeds for one,
+          # but publish-clawhub.yml triggers on "release: published", so a draft
+          # would turn this check green while ClawHub keeps serving the old
+          # version - the exact failure this check exists to catch. A prerelease
+          # is fine; publishing one does fire the release event.
+          STATE=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)
+          case "$STATE" in
+            false)
+              echo "SKILL.md is at $VERSION and v$VERSION is published."
+              exit 0
+              ;;
+            true)
+              echo "::error::v$VERSION exists but is still a DRAFT. Nothing publishes to ClawHub until it is published: gh release edit v$VERSION --draft=false"
+              exit 1
+              ;;
+            *)
+              echo "::error::$SKILL_DIR/SKILL.md is at $VERSION, but no v$VERSION release exists. ClawHub is still serving the previously released version. Cut it with: gh release create v$VERSION --target main"
+              exit 1
+              ;;
+          esac
