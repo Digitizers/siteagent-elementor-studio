@@ -1,0 +1,55 @@
+name: Release drift
+
+# The ClawHub publish workflow runs only on a published GitHub Release. A version
+# bump merged to main without one leaves ClawHub serving the PREVIOUS version,
+# silently — hostinger-mcp and siteagent-elementor-studio each sat two months
+# behind that way, and it was noticed by chance in the ClawHub UI.
+#
+# This fails on main when SKILL.md's version has no matching release, so the
+# gap shows up as a red check instead of as stale published content.
+#
+# It enforces the MECHANISM, not the outcome: a skill published to ClawHub by
+# hand still reads as drift here until a release exists. That is deliberate —
+# the release notes are where "what changed" is supposed to live.
+#
+# It does not run on pull requests. The PR that bumps the version legitimately
+# has no release yet; the release is cut after the merge.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: SKILL.md version has a release
+    runs-on: ubuntu-latest
+    env:
+      SKILL_DIR: "files"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare SKILL.md with the published releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # '|| true' guards the pipeline: under pipefail a non-matching grep
+          # would abort the step before the error message below could explain why.
+          VERSION=$(grep -m1 '^version:' "$SKILL_DIR/SKILL.md" 2>/dev/null \
+            | sed 's/^version:[[:space:]]*//' | tr -d '"' | tr -d "'" | xargs || true)
+          if [ -z "$VERSION" ]; then
+            echo "::error::No 'version:' found in $SKILL_DIR/SKILL.md"
+            exit 1
+          fi
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "SKILL.md is at $VERSION and v$VERSION is released."
+            exit 0
+          fi
+          echo "::error::$SKILL_DIR/SKILL.md is at $VERSION, but no v$VERSION release exists. ClawHub is still serving the previously released version. Cut it with: gh release create v$VERSION --target main"
+          exit 1
