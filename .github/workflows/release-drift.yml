@@ -38,7 +38,13 @@ jobs:
     env:
       SKILL_DIR: "files"
     steps:
+      # Always main, never the event's own ref. A release-triggered run checks
+      # out the TAG by default, so publishing an older draft - or publishing
+      # after main has moved on - would read that tag's SKILL.md and report on
+      # a version nobody is asking about. The invariant is about main.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Compare SKILL.md with the published releases
         env:
@@ -58,8 +64,25 @@ jobs:
           # would turn this check green while ClawHub keeps serving the old
           # version - the exact failure this check exists to catch. A prerelease
           # is fine; publishing one does fire the release event.
-          STATE=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" \
-            --json isDraft --jq '.isDraft' 2>/dev/null || echo missing)
+          # A lookup that FAILED is not the same as a release that is ABSENT.
+          # Collapsing both into "missing" would report "cut the release" after
+          # a transient API blip, sending someone to create a release that
+          # already exists.
+          ERR=$(mktemp)
+          set +e
+          DRAFT=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" \
+            --jq '.draft' 2>"$ERR")
+          RC=$?
+          set -e
+          if [ "$RC" -eq 0 ]; then
+            STATE=$DRAFT
+          elif grep -qiE '404|not found' "$ERR"; then
+            STATE=missing
+          else
+            echo "::error::Could not query releases - this is a lookup failure, not a missing release:"
+            cat "$ERR" >&2
+            exit 1
+          fi
           case "$STATE" in
             false)
               echo "SKILL.md is at $VERSION and v$VERSION is published."
