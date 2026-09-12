@@ -79,20 +79,45 @@ http_verdict(){
 # stdin -> same JSON with the Basic credential replaced by a placeholder
 redact_basic_auth(){ sed -E 's#("Authorization": "Basic )[^"]*#\1<base64 of WP_USERNAME:WP_APP_PASSWORD>#'; }
 
-# arg1: target path; arg2: content -> writes it 0600, ATOMICALLY.
-# Exit codes: 0 ok | 2 cannot create temp | 3 cannot secure temp | 4 write
-# failed | 5 rename failed. The target is only ever replaced by a file that is
-# already mode 600 and already holds the content: truncating the target first
-# and checking afterwards destroys the user's existing config on any failure.
+# "yes" when this is Git Bash / MSYS / Cygwin on Windows.
+is_windows_bash(){
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) printf 'yes' ;;
+    *) printf 'no' ;;
+  esac
+}
+
+# arg1: target path; arg2: content -> writes it owner-only, ATOMICALLY.
+# Exit codes: 0 ok | 2 cannot create temp | 3 cannot secure temp (POSIX modes)
+# | 4 write failed | 5 rename failed | 6 cannot secure temp (Windows ACLs).
+#
+# The target is only ever replaced by a file that is already secured and
+# already holds the content: truncating the target first and checking
+# afterwards destroys the user's existing config on any failure.
+#
+# Windows is a separate path on purpose. Git Bash on NTFS does not implement
+# POSIX mode bits - `chmod 600` can report success while `ls -l` still shows
+# -rw-r--r-- - so verifying the mode there would reject every write and make
+# the wizard unusable on a platform this kit documents as supported. icacls is
+# the mechanism that actually restricts the file on that platform.
 write_secret_file(){
   _target="${1:-}"; _content="${2:-}"
   _dir=$(dirname "$_target")
   _tmp=$(mktemp "$_dir/.mcp.json.XXXXXX" 2>/dev/null) || return 2
-  chmod 600 "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 3; }
-  case "$(ls -l "$_tmp" 2>/dev/null | cut -c1-10)" in
-    -rw-------*) ;;
-    *) rm -f "$_tmp"; return 3 ;;
-  esac
+  if [ "$(is_windows_bash)" = "yes" ]; then
+    _win=$(cygpath -w "$_tmp" 2>/dev/null || printf '%s' "$_tmp")
+    _who="${USERNAME:-$(whoami 2>/dev/null)}"
+    [ -n "$_who" ] || { rm -f "$_tmp"; return 6; }
+    # Break inheritance and grant only this user - before the secret is written.
+    icacls "$_win" /inheritance:r /grant:r "${_who}:F" >/dev/null 2>&1 \
+      || { rm -f "$_tmp"; return 6; }
+  else
+    chmod 600 "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 3; }
+    case "$(ls -l "$_tmp" 2>/dev/null | cut -c1-10)" in
+      -rw-------*) ;;
+      *) rm -f "$_tmp"; return 3 ;;
+    esac
+  fi
   printf '%s\n' "$_content" > "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 4; }
   mv -f "$_tmp" "$_target" 2>/dev/null || { rm -f "$_tmp"; return 5; }
   return 0
@@ -1030,6 +1055,9 @@ if [ "${SKIP_WRITE:-0}" != "1" ]; then
     3) abort "Refusing to write credentials — could not secure the file at mode 600.
   This filesystem may not carry permission bits (a mounted share, some FAT/exFAT volumes).
   Use a local directory you own. Your existing $MCP_FILE was left untouched." ;;
+    6) abort "Refusing to write credentials — could not restrict the file with icacls.
+  Run this from a directory on a local NTFS drive (not a network share), and check
+  that icacls is on PATH. Your existing $MCP_FILE was left untouched." ;;
     4) abort "Refusing to write credentials — writing the config failed. Your existing $MCP_FILE was left untouched." ;;
     5) abort "Refusing to write credentials — could not replace $MCP_FILE.
   It may be owned by another user, or the directory may not be writable. The existing file was left untouched." ;;

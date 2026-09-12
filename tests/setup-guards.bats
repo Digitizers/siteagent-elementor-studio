@@ -139,3 +139,24 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   [ "$(find "$dir" -name '.mcp.json.*' | wc -l | tr -d ' ')" = "0" ]
 }
 
+# ---- platform split (Codex, PR #32): Git Bash on NTFS has no POSIX modes ------
+@test "platform detection reports this machine correctly" {
+  fn is_windows_bash
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) [ "$output" = "yes" ] ;;
+    *) [ "$output" = "no" ] ;;
+  esac
+}
+
+@test "the POSIX mode check is not applied on Windows" {
+  # Guard the branch itself: the mode verification must sit under the non-Windows
+  # arm, or every Git Bash write is rejected and the wizard is unusable there.
+  run bash -c "sed -n '/^write_secret_file()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"is_windows_bash"* ]]
+  [[ "$output" == *"icacls"* ]]
+  # the -rw------- assertion must appear AFTER the else, not before the branch
+  posix_line=$(printf '%s\n' "$output" | grep -n -- "-rw-------" | head -1 | cut -d: -f1)
+  else_line=$(printf '%s\n' "$output" | grep -n "^  else" | head -1 | cut -d: -f1)
+  [ -n "$posix_line" ] && [ -n "$else_line" ] && [ "$posix_line" -gt "$else_line" ]
+}
+
