@@ -24,8 +24,15 @@ on:
     branches: [main]
   release:
     types: [published]
+  # Daily, not weekly, because of a residual this workflow cannot fix by itself:
+  # on a release event GITHUB_SHA is the TAGGED commit, so when a release is
+  # published AFTER main has advanced, a green run lands on the tag's commit and
+  # cannot replace the red check sitting on main's head. Re-dispatching against
+  # main would need a PAT - the repository GITHUB_TOKEN is exactly what GitHub
+  # suppresses to prevent recursion - and a stored credential in five repos is a
+  # worse trade than a check that self-heals within a day.
   schedule:
-    - cron: "0 9 * * 1"
+    - cron: "0 9 * * *"
   workflow_dispatch:
 
 permissions:
