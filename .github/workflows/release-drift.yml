@@ -45,7 +45,7 @@ jobs:
   # repository_dispatch. No PAT is needed.
   redispatch:
     name: Re-run against main
-    if: github.event_name == 'release' || github.event_name == 'workflow_run'
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -59,7 +59,7 @@ jobs:
     name: SKILL.md version has a release
     # The dispatched run lands here. Guarding on the event name is what keeps
     # the two jobs from calling each other forever.
-    if: github.event_name != 'release' && github.event_name != 'workflow_run'
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     env:
       SKILL_DIR: "files"
@@ -111,7 +111,32 @@ jobs:
           fi
           case "$STATE" in
             false)
-              echo "SKILL.md is at $VERSION and v$VERSION is published."
+              # A published v$VERSION is not enough: the TAG may point at an
+              # older commit - a draft cut before the bump merged, say. Since
+              # publish-clawhub.yml checks out the tagged commit and reads ITS
+              # SKILL.md, that tag would publish the older version (or fail as
+              # "already exists") while main stays unpublished, with this check
+              # green. So compare the version AT THE TAG with main's.
+              TAG_ERR=$(mktemp)
+              set +e
+              TAG_FILE=$(gh api \
+                "repos/$GITHUB_REPOSITORY/contents/$SKILL_DIR/SKILL.md?ref=v$VERSION" \
+                --jq '.content' 2>"$TAG_ERR")
+              TAG_RC=$?
+              set -e
+              if [ "$TAG_RC" -ne 0 ]; then
+                echo "::error::v$VERSION is published, but $SKILL_DIR/SKILL.md could not be read at that tag:"
+                cat "$TAG_ERR" >&2
+                exit 1
+              fi
+              TAG_VERSION=$(printf '%s' "$TAG_FILE" | tr -d '\n' | base64 -d \
+                | grep -m1 '^version:' | sed 's/^version:[[:space:]]*//' \
+                | tr -d '"' | tr -d "'" | xargs || true)
+              if [ "$TAG_VERSION" != "$VERSION" ]; then
+                echo "::error::main is at $VERSION, but tag v$VERSION points at a commit whose SKILL.md says ${TAG_VERSION:-<none>}. ClawHub would publish that one. Re-cut the tag on the commit that carries $VERSION."
+                exit 1
+              fi
+              echo "SKILL.md is at $VERSION, v$VERSION is published, and the tag carries $TAG_VERSION."
               exit 0
               ;;
             true)
