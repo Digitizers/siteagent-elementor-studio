@@ -22,6 +22,15 @@
 
 set -uo pipefail
 
+# Absolute path to this script, for retry hints. The wizard is invoked as
+# `bash "<skill-dir>/setup-elementor-mcp.sh"` (or through ~/.claude/scripts/)
+# while the working directory is the user's PROJECT - that is where .mcp.json
+# has to land - so a hint reading `bash setup-elementor-mcp.sh` cannot be
+# copied and run: the file is not in that directory. Captured before anything
+# could change the working directory.
+SELF=${BASH_SOURCE[0]:-$0}
+case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
+
 # ---- pretty-print helpers ----------------------------------------------------
 BOLD=$'\033[1m'; DIM=$'\033[2m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'
 RED=$'\033[31m'; CYAN=$'\033[36m'; RESET=$'\033[0m'
@@ -115,7 +124,8 @@ is_windows_bash(){
 }
 
 # arg1: target path; arg2: content -> writes it owner-only, ATOMICALLY.
-# Exit codes: 0 ok | 2 cannot create temp | 3 cannot secure temp (POSIX modes)
+# Exit codes: 0 ok | 2 cannot create temp | 3 cannot secure temp (POSIX modes
+# or a surviving ACL)
 # | 4 write failed | 5 rename failed | 6 cannot secure temp (Windows ACLs).
 #
 # The target is only ever replaced by a file that is already secured and
@@ -147,10 +157,30 @@ write_secret_file(){
       || { rm -f "$_tmp"; return 6; }
   else
     chmod 600 "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 3; }
-    case "$(ls -l "$_tmp" 2>/dev/null | cut -c1-10)" in
+    # Mode bits are not the whole permission story. A temp file created in a
+    # directory that carries an inheritable ACL inherits its entries, and
+    # `chmod` does not touch them - another principal can still read the file
+    # while `ls -l` reads -rw-------. Strip the ACL with whichever tool this
+    # platform has, then verify none survived.
+    chmod -N "$_tmp" 2>/dev/null || true
+    command -v setfacl >/dev/null 2>&1 && setfacl -b "$_tmp" 2>/dev/null || true
+    case "$(ls -l "$_tmp" 2>/dev/null | head -1)" in
       -rw-------*) ;;
       *) rm -f "$_tmp"; return 3 ;;
     esac
+    # Verify by LISTING the entries, not by the flag character after the mode.
+    # On macOS that character is "+" for an ACL but "@" for extended
+    # attributes, and only one is ever shown - `com.apple.provenance` is set on
+    # ordinary new files there, so an inherited ACL routinely hides behind "@".
+    # `ls -le` prints one line per ACE; BSD only, so a shell whose ls rejects
+    # -e falls back to the "+" marker, which IS reliable on Linux (no "@").
+    if _acl=$(ls -le "$_tmp" 2>/dev/null); then
+      [ "$(printf '%s\n' "$_acl" | wc -l | tr -d ' ')" -gt 1 ] && { rm -f "$_tmp"; return 3; }
+    else
+      case "$(ls -l "$_tmp" 2>/dev/null | head -1)" in
+        -rw-------+*) rm -f "$_tmp"; return 3 ;;
+      esac
+    fi
   fi
   printf '%s\n' "$_content" > "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 4; }
   mv -f "$_tmp" "$_target" 2>/dev/null || { rm -f "$_tmp"; return 5; }
@@ -355,7 +385,7 @@ else
   case "$(http_verdict "$SITE_URL")" in
     refused)
       abort "Refusing http:// for $(url_host "$SITE_URL") — the application password would travel unencrypted.
-  Use https://, or name this host explicitly: WP_ALLOW_HTTP=$(url_host "$SITE_URL") bash setup-elementor-mcp.sh"
+  Use https://, or name this host explicitly: WP_ALLOW_HTTP=$(url_host "$SITE_URL") bash \"$SELF\""
       ;;
     named)
       warn "Sending credentials over plaintext http to $(url_host "$SITE_URL") (WP_ALLOW_HTTP names it)."
@@ -892,7 +922,7 @@ print((a[0].get("digest") or "").replace("sha256:","") if a else "")
     ok "Download verified (sha256 ${EM_ACTUAL:0:12}…)${EMCP_EXPECTED_SHA256:+ against EMCP_EXPECTED_SHA256}"
   else
     warn "This release publishes no sha256 for its asset — installing an UNVERIFIED download."
-    info "  Pin it instead: EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> ./setup-elementor-mcp.sh"
+    info "  Pin it instead: EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> bash \"$SELF\""
   fi
 
   # Repack with clean folder name (zipballs have ugly hash-suffixed dirs)

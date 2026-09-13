@@ -296,3 +296,51 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   run bash -c "sed -n '/^SITE_IS_LOCAL=no/,+1p' '$SCRIPT'"
   [[ "$output" == *'"$MODE" = "local"'* ]]
 }
+
+# ---- inherited ACLs and retry hints (Codex, PR #32 round 8) ------------------
+@test "a credential file is written with no inherited ACL" {
+  # A temp file created in a directory carrying an inheritable ACL inherits its
+  # entries, and chmod does not touch them - another principal could read the
+  # reusable Basic credential while ls -l still read -rw-------.
+  [ "$(uname -s)" = "Darwin" ] || skip "needs BSD chmod +a / ls -le"
+  d="$BATS_TEST_TMPDIR/acl"
+  mkdir -p "$d"
+  chmod +a "everyone allow read,readattr,file_inherit" "$d" || skip "cannot set an ACL here"
+  # the inheritance is real: an ordinary file created here picks the ACE up
+  touch "$d/witness"
+  [ "$(ls -le "$d/witness" | wc -l | tr -d ' ')" -gt 1 ]
+  run bash "$SCRIPT" --self-test-fn write_secret_file "$d/.mcp.json" '{"x":1}' </dev/null
+  [ "$status" -eq 0 ]
+  [ "$(ls -le "$d/.mcp.json" | wc -l | tr -d ' ')" -eq 1 ]
+  [[ "$(ls -l "$d/.mcp.json" | cut -c1-10)" == "-rw-------" ]]
+}
+
+@test "the ACL check lists entries rather than trusting the flag character" {
+  # On macOS ls -l shows "+" for an ACL but "@" for extended attributes, and
+  # only ONE of them - com.apple.provenance is set on ordinary new files there,
+  # so an inherited ACL routinely hides behind "@".
+  run bash -c "sed -n '/^write_secret_file()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"ls -le"* ]]
+  [[ "$output" == *"chmod -N"* ]]
+  [[ "$output" == *"setfacl -b"* ]]
+}
+
+@test "retry hints name the script's real path" {
+  # The wizard runs as `bash "<skill-dir>/setup-elementor-mcp.sh"` from the
+  # user's PROJECT directory, so a hint reading `bash setup-elementor-mcp.sh`
+  # cannot be copied and run - the file is not in that directory.
+  run bash -c "grep -nE '(bash|\\./)[^\"]*setup-elementor-mcp\\.sh' '$SCRIPT' | grep -v '^\\s*[0-9]*:#' | grep -v 'SELF'"
+  [ -z "$output" ]
+  run bash -c "grep -c 'bash \\\\\"\$SELF\\\\\"' '$SCRIPT'"
+  [ "$output" -ge 2 ]
+}
+
+@test "the script resolves its own path before anything can change directory" {
+  self_line=$(grep -n '^SELF=' "$SCRIPT" | head -1 | cut -d: -f1)
+  [ -n "$self_line" ]
+  run bash -c "sed -n '${self_line},+1p' '$SCRIPT'"
+  [[ "$output" == *'PWD'* ]]
+  # nothing may cd before it
+  cd_line=$(grep -n '^[[:space:]]*cd ' "$SCRIPT" | head -1 | cut -d: -f1)
+  [ -z "$cd_line" ] || [ "$self_line" -lt "$cd_line" ]
+}
