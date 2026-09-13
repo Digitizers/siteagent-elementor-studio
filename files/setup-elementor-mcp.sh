@@ -47,10 +47,13 @@ url_host(){
   #
   # Userinfo must not decide the host either: http://localhost:x@remote.example
   # parsed as "localhost", so the plaintext guard waved it through while the
-  # credentials went to remote.example. Take the authority first (a path can
-  # contain "@"), then drop everything up to the last "@".
+  # credentials went to remote.example.
+  #
+  # The authority ends at "/", "?" OR "#" (RFC 3986, and curl agrees). Stopping
+  # only at "/" left http://evil.example?@localhost parsing as "localhost" -
+  # the same bypass through a different separator.
   _u=$(printf '%s' "${1:-}" | sed -E 's#^https?://##')
-  _u=${_u%%/*}
+  _u=${_u%%[/?#]*}
   _u=${_u##*@}
   case "$_u" in
     \[*) printf '%s' "${_u#[}" | sed -E 's#\].*$##' | tr '[:upper:]' '[:lower:]' ;;
@@ -340,9 +343,7 @@ else
   # plaintext http is refused unless the host is a local dev host or the caller
   # names it explicitly - same rule, and the same reasoning, as
   # wordpress-api-pro's WP_ALLOW_HTTP.
-  SITE_VERDICT=$(http_verdict "$SITE_URL")
-  [ "$SITE_VERDICT" = "local" ] && SITE_IS_LOCAL=yes
-  case "$SITE_VERDICT" in
+  case "$(http_verdict "$SITE_URL")" in
     refused)
       abort "Refusing http:// for $(url_host "$SITE_URL") — the application password would travel unencrypted.
   Use https://, or name this host explicitly: WP_ALLOW_HTTP=$(url_host "$SITE_URL") bash setup-elementor-mcp.sh"
@@ -355,6 +356,13 @@ else
 fi
 
 # ---- 3. Connectivity probe ---------------------------------------------------
+# Both modes land here, and only this point is guaranteed to have the final
+# SITE_URL. Setting the flag in the live-host branch alone left every
+# Local-by-Flywheel run - the common case - talking to its site through a
+# configured proxy.
+SITE_IS_LOCAL=no
+[ "$(http_verdict "$SITE_URL")" = "local" ] && SITE_IS_LOCAL=yes
+
 step "3/8  Connectivity"
 HTTP_CODE=$(site_curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SITE_URL/wp-json/" || echo "000")
 case "$HTTP_CODE" in

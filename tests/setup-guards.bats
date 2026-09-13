@@ -216,3 +216,34 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   [[ "$output" == *"--noproxy"* ]]
 }
 
+# ---- authority separators (Codex, PR #32): same bypass, different character --
+@test "a query marker cannot smuggle a local host" {
+  fn url_host "http://evil.example?@localhost"
+  [ "$output" = "evil.example" ]
+  fn http_verdict "http://evil.example?@localhost"
+  [ "$output" = "refused" ]
+}
+
+@test "a fragment marker cannot either" {
+  fn url_host "http://evil.example#@localhost"
+  [ "$output" = "evil.example" ]
+  fn http_verdict "http://evil.example#@localhost"
+  [ "$output" = "refused" ]
+}
+
+@test "a legitimate query string with an @ is unaffected" {
+  fn url_host "https://example.com/a?b=@c"
+  [ "$output" = "example.com" ]
+}
+
+@test "the proxy-bypass flag is set where both modes converge" {
+  # Setting it only in the live-host branch left every Local-by-Flywheel run -
+  # the common case - talking to its site through a configured proxy.
+  run bash -c "grep -n 'SITE_IS_LOCAL=' '$SCRIPT' | grep -v 'SITE_IS_LOCAL:-no'"
+  [[ "$output" == *"SITE_IS_LOCAL=no"* ]]
+  # it must be computed before the connectivity step, which both modes reach
+  set_line=$(grep -n '^SITE_IS_LOCAL=no' "$SCRIPT" | cut -d: -f1)
+  probe_line=$(grep -n '3/8  Connectivity' "$SCRIPT" | cut -d: -f1)
+  [ "$set_line" -lt "$probe_line" ]
+}
+
