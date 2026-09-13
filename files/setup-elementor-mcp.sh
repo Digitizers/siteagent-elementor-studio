@@ -70,12 +70,56 @@ url_host(){
   esac
 }
 
-# arg1: host -> "yes" when it is a local dev host (no wire to sniff)
+# arg1: host -> "yes" when the traffic provably cannot leave this machine.
+#
+# A SUFFIX is not that proof. ".local" is mDNS: "wordpress.local" commonly
+# resolves to another machine on the LAN, and ".test" resolves to whatever the
+# resolver was told. Treating either as local waived the plaintext refusal AND
+# bypassed proxies, so the reusable application password would have crossed a
+# real network in the clear while the wizard reported the host as local.
+#
+# Only an address that IS loopback counts. An IP literal is read directly; a
+# name is resolved, and EVERY address it resolves to must be loopback - one
+# routable answer is enough to refuse. "localhost" and *.localhost are loopback
+# by RFC 6761, so they are answered without a lookup. 0.0.0.0 is unspecified,
+# which as a destination means this machine.
+#
+# Failure is "no": an unresolvable name, a missing python3, a lookup that hangs
+# past the alarm. Local-by-Flywheel does not depend on this - choosing that mode
+# sets SITE_IS_LOCAL itself - so a refusal here only ever affects a URL someone
+# typed into live-host mode.
 is_local_host(){
-  case "${1:-}" in
-    localhost|127.0.0.1|0.0.0.0|::1|*.local|*.test|*.localhost) printf 'yes' ;;
-    *) printf 'no' ;;
+  _h="${1:-}"
+  case "$_h" in
+    localhost|*.localhost) printf 'yes'; return ;;
+    "") printf 'no'; return ;;
   esac
+  python3 - "$_h" <<'PY' 2>/dev/null || printf 'no'
+import ipaddress, signal, socket, sys
+
+def bail(*_):
+    print('no')
+    sys.exit(0)
+
+signal.signal(signal.SIGALRM, bail)
+signal.alarm(3)
+host = sys.argv[1]
+try:
+    print('yes' if ipaddress.ip_address(host).is_loopback
+                 or ipaddress.ip_address(host).is_unspecified else 'no')
+    sys.exit(0)
+except ValueError:
+    pass
+try:
+    addresses = {info[4][0].split('%')[0] for info in socket.getaddrinfo(host, None)}
+except OSError:
+    bail()
+try:
+    ok = bool(addresses) and all(ipaddress.ip_address(a).is_loopback for a in addresses)
+except ValueError:
+    ok = False
+print('yes' if ok else 'no')
+PY
 }
 
 # The local-host exemption rests on the traffic never leaving the machine. A
@@ -125,7 +169,7 @@ is_windows_bash(){
 
 # arg1: target path; arg2: content -> writes it owner-only, ATOMICALLY.
 # Exit codes: 0 ok | 2 cannot create temp | 3 cannot secure temp (POSIX modes
-# or a surviving ACL)
+# or a surviving ACL) | 7 the target is a directory
 # | 4 write failed | 5 rename failed | 6 cannot secure temp (Windows ACLs).
 #
 # The target is only ever replaced by a file that is already secured and
@@ -139,6 +183,11 @@ is_windows_bash(){
 # the mechanism that actually restricts the file on that platform.
 write_secret_file(){
   _target="${1:-}"; _content="${2:-}"
+  # `mv -f tmp somedir` moves INTO the directory. Left unchecked, a .mcp.json
+  # that is a directory would swallow the temp file - the helper returning 0,
+  # the wizard reporting the config written, Claude still finding nothing at
+  # that path, and a file holding the credential left inside the directory.
+  [ -d "$_target" ] && return 7
   _dir=$(dirname "$_target")
   _tmp=$(mktemp "$_dir/.mcp.json.XXXXXX" 2>/dev/null) || return 2
   if [ "$(is_windows_bash)" = "yes" ]; then
@@ -1138,6 +1187,9 @@ if [ "${SKIP_WRITE:-0}" != "1" ]; then
   Run this from a directory on a local NTFS drive (not a network share), and check
   that icacls is on PATH. Your existing $MCP_FILE was left untouched." ;;
     4) abort "Refusing to write credentials — writing the config failed. Your existing $MCP_FILE was left untouched." ;;
+    7) abort "Refusing to write credentials — $MCP_FILE is a directory.
+  Remove or rename it, then re-run. (Writing into it would leave the credential in a file
+  Claude never reads.)" ;;
     5) abort "Refusing to write credentials — could not replace $MCP_FILE.
   It may be owned by another user, or the directory may not be writable. The existing file was left untouched." ;;
   esac
@@ -1178,7 +1230,10 @@ elif [ "${TRACKED_PLACEHOLDER:-0}" != "1" ]; then
   printf '%s\n' "$NEW_CONFIG" | redact_basic_auth | sed 's/^/      /'
   info "  Produce the value with (it will prompt for the password, so it stays"
   info "  out of your shell history):"
-  info "      printf '%s:%s' '${WP_USER}' \"\$(read -rs -p 'app password: ' p; echo \"\$p\")\" | base64"
+  # GNU base64 wraps at 76 columns, so a long user:password pair comes back on
+  # several lines and pasting it into the JSON above yields an invalid config.
+  # tr -d is portable; -w0 is GNU-only.
+  info "      printf '%s:%s' '${WP_USER}' \"\$(read -rs -p 'app password: ' p; echo \"\$p\")\" | base64 | tr -d '\\n'; echo"
   warn "SECURITY: that config embeds a reusable WordPress credential — write it"
   info "  with mode 600, keep it out of version control, and rotate/revoke the"
   info "  Application Password after use."

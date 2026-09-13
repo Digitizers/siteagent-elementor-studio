@@ -21,11 +21,36 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   [ "$output" = "refused" ]
 }
 
-@test "local dev hosts stay allowed over http" {
-  for url in http://mysite.local http://localhost:10004 http://127.0.0.1 http://foo.test http://bar.localhost; do
+@test "loopback hosts stay allowed over http" {
+  # RFC 6761 names and loopback literals need no lookup
+  for url in http://localhost:10004 http://127.0.0.1 "http://[::1]/" http://bar.localhost; do
     fn http_verdict "$url"
     [ "$output" = "local" ] || { echo "failed for $url: $output"; return 1; }
   done
+}
+
+@test "a suffix alone is not evidence of locality" {
+  # ".local" is mDNS: wordpress.local commonly resolves to another machine on
+  # the LAN. Treating the suffix as local waived the plaintext refusal AND
+  # bypassed proxies, sending the application password over a real network.
+  for url in http://wordpress.local http://foo.test; do
+    fn http_verdict "$url"
+    [ "$output" = "refused" ] || { echo "failed for $url: $output"; return 1; }
+  done
+}
+
+@test "a .local name that resolves to loopback is still local" {
+  # Local-by-Flywheel writes its sites into /etc/hosts, so the common case keeps
+  # working - it is the ADDRESS that decides, not the suffix.
+  h=$(awk '$1=="127.0.0.1" && $2 ~ /\.local$/ {print $2; exit}' /etc/hosts)
+  [ -n "$h" ] || skip "no 127.0.0.1 .local entry in /etc/hosts on this machine"
+  fn http_verdict "http://$h"
+  [ "$output" = "local" ]
+}
+
+@test "an unresolvable name is refused, not assumed local" {
+  fn http_verdict "http://definitely-no-such-host-98f3a1.invalid"
+  [ "$output" = "refused" ]
 }
 
 @test "naming the host permits it" {
@@ -185,7 +210,7 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
 }
 
 @test "userinfo before a genuinely local host still reads as local" {
-  fn http_verdict "http://admin@mysite.local/"
+  fn http_verdict "http://admin@localhost/"
   [ "$output" = "local" ]
 }
 
@@ -343,4 +368,39 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   # nothing may cd before it
   cd_line=$(grep -n '^[[:space:]]*cd ' "$SCRIPT" | head -1 | cut -d: -f1)
   [ -z "$cd_line" ] || [ "$self_line" -lt "$cd_line" ]
+}
+
+@test "a directory at the config path is refused, not written into" {
+  # `mv -f tmp somedir` moves INTO the directory: the helper would return 0, the
+  # wizard would report the config written, Claude would find nothing at that
+  # path, and the credential would sit in a file inside the directory.
+  d="$BATS_TEST_TMPDIR/dir-target"
+  mkdir -p "$d/.mcp.json"
+  run bash "$SCRIPT" --self-test-fn write_secret_file "$d/.mcp.json" '{"x":1}' </dev/null
+  [ "$status" -eq 7 ]
+  [ -z "$(ls -A "$d/.mcp.json")" ]
+  # the wizard must have a message for it rather than falling through the case
+  run bash -c "grep -c '7) abort' '$SCRIPT'"
+  [ "$output" -ge 1 ]
+}
+
+@test "the base64 hint cannot emit a wrapped credential" {
+  # GNU base64 wraps at 76 columns, so a long user:password pair comes back on
+  # several lines and pasting it into the JSON yields an invalid config.
+  run bash -c "grep -nE '\| *base64' '$SCRIPT' | grep -v \"tr -d\""
+  [ -z "$output" ]
+  # and the value the wizard itself computes never wraps: python3's b64encode
+  # emits one line by construction, unlike the base64(1) the hint shells out to
+  run bash -c "grep -c 'base64.b64encode' '$SCRIPT'"
+  [ "$output" -ge 1 ]
+}
+
+@test "the loopback test fails closed" {
+  # an unresolvable name, and an address that is routable
+  fn is_local_host "definitely-no-such-host-98f3a1.invalid"
+  [ "$output" = "no" ]
+  fn is_local_host "1.1.1.1"
+  [ "$output" = "no" ]
+  fn is_local_host ""
+  [ "$output" = "no" ]
 }
