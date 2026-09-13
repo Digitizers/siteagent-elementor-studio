@@ -496,11 +496,13 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
 127.invalid badname.local
 127.0.0 short.local
 127.1.2.3 highoctet.local
+127.00.0.1 lead0.local
+127.008.0.1 lead8.local
 HOSTS
   for case in "both.local:no" "pure.local:yes" "lan.local:no" \
               "commented.local:yes" "disabled.local:no" "absent.local:no" \
               "bad256.local:no" "badname.local:no" "short.local:no" \
-              "highoctet.local:yes"; do
+              "highoctet.local:yes" "lead0.local:no" "lead8.local:no"; do
     fn hosts_maps_to_loopback "${case%%:*}" "$hf"
     [ "$output" = "${case##*:}" ] || { echo "failed for $case: got $output"; return 1; }
   done
@@ -524,6 +526,18 @@ HOSTS
   [[ "$output" == *"is_windows_bash"* ]]
   [[ "$output" == *"cygpath"* ]]
   [[ "$output" == *"System32/drivers/etc/hosts"* ]]
+}
+
+@test "a CRLF hosts file still matches its last field" {
+  # The Windows resolver file is CRLF, so the last field arrives as
+  # "site.local\r" and never matched - reporting a legitimate Local mapping as
+  # absent and aborting the run, which pushes the user toward WP_ALLOW_HTTP.
+  hf="$BATS_TEST_TMPDIR/win-hosts"
+  printf '127.0.0.1 crlf.local\r\n127.0.0.1 crlf2.local other.local\r\n' > "$hf"
+  for h in crlf.local crlf2.local other.local; do
+    fn hosts_maps_to_loopback "$h" "$hf"
+    [ "$output" = "yes" ] || { echo "failed for $h: $output"; return 1; }
+  done
 }
 
 @test "the hosts-file argument is a test seam only" {

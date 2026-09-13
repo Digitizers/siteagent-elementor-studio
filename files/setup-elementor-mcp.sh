@@ -125,13 +125,23 @@ hosts_maps_to_loopback(){
   # bypassed the proxy and waived the plaintext refusal. Same mistake the
   # is_local_host glob made; it needs a real dotted quad here too.
   awk -v want="$_hh" '
+    # CANONICAL decimal octets - no leading zeros. "127.00.0.1" and
+    # "127.008.0.1" pass a loose numeric test, but resolvers disagree about
+    # them: a strict parser rejects the line outright and falls through to DNS,
+    # and one reading them as octal means something else again. An address two
+    # parsers read differently is not evidence that the traffic stays on this
+    # machine, so it does not count as loopback here.
     function is_loopback(a,   p, i) {
       if (a == "::1") return 1
-      if (a !~ /^127\.[0-9]+\.[0-9]+\.[0-9]+$/) return 0
+      if (a !~ /^127\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$/) return 0
       split(a, p, ".")
       for (i = 2; i <= 4; i++) if (p[i] + 0 > 255) return 0
       return 1
     }
+    # The Windows resolver file is CRLF, so the last field on a line arrives as
+    # "site.local\r" and never matches - which would report a legitimate Local
+    # mapping as absent and abort the run.
+    { sub(/\r$/, "") }
     { sub(/#.*/, "") }
     NF < 2 { next }
     {

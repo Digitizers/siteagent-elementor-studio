@@ -40,7 +40,7 @@ and MSYS's `/etc/hosts` is not guaranteed to be it — reading the wrong one wou
 report a legitimate Local domain as unmapped and abort. Implemented, not
 verified on a real Windows machine, like the rest of that path.
 
-79 tests.
+80 tests.
 
 **Not changed:** the plugin download still defaults to `releases/latest` rather
 than a pinned tag. Pinning by default would strand users on whatever version the
