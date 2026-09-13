@@ -98,19 +98,29 @@ valid_host(){
 #
 # The residual limit is honest and narrow: the file can be edited after setup,
 # by root.
+# arg2 is the hosts file, for the tests; nothing in this script passes it.
 hosts_maps_to_loopback(){
   _hh=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
+  _hf="${2:-/etc/hosts}"
   [ -n "$_hh" ] || { printf 'no'; return; }
-  [ -r /etc/hosts ] || { printf 'no'; return; }
+  [ -r "$_hf" ] || { printf 'no'; return; }
+  # EVERY mapping for the name must be loopback, not merely one of them. The
+  # resolver hands curl all of a name's addresses, and curl tries the next one
+  # when a connection fails - so a name with both 127.0.0.1 and a LAN address
+  # reaches the LAN address the moment the local site is stopped, with the proxy
+  # bypassed and the plaintext refusal waived. Stopping at the first loopback
+  # match answered "yes" for exactly that host.
   awk -v want="$_hh" '
     { sub(/#.*/, "") }
     NF < 2 { next }
     {
-      if ($1 !~ /^127\./ && $1 != "::1") next
-      for (i = 2; i <= NF; i++) if (tolower($i) == want) { found = 1; exit }
+      for (i = 2; i <= NF; i++) if (tolower($i) == want) {
+        seen = 1
+        if ($1 !~ /^127\./ && $1 != "::1") bad = 1
+      }
     }
-    END { exit(found ? 0 : 1) }
-  ' /etc/hosts && printf 'yes' || printf 'no'
+    END { exit(seen && !bad ? 0 : 1) }
+  ' "$_hf" && printf 'yes' || printf 'no'
 }
 
 # arg1: host -> "yes" when the traffic provably cannot leave this machine,

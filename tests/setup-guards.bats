@@ -477,11 +477,33 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   done
 }
 
-@test "a hosts entry pointing somewhere else is not loopback" {
-  # only 127.0.0.0/8 and ::1 count; a LAN address in /etc/hosts must not pass
-  run bash -c "sed -n '/^hosts_maps_to_loopback()/,/^}/p' '$SCRIPT'"
-  [[ "$output" == *'$1 !~ /^127\./'* ]]
-  [[ "$output" == *'$1 != "::1"'* ]]
+@test "EVERY mapping for the name must be loopback" {
+  # The resolver hands curl all of a name's addresses and curl tries the next
+  # one when a connection fails, so a name with both 127.0.0.1 and a LAN address
+  # reaches the LAN the moment the local site is stopped - with the proxy
+  # bypassed and the plaintext refusal waived. Stopping at the first loopback
+  # match answered "yes" for exactly that host.
+  hf="$BATS_TEST_TMPDIR/hosts"
+  cat > "$hf" <<'HOSTS'
+127.0.0.1 both.local
+192.168.1.50 both.local
+127.0.0.1 pure.local
+::1 pure.local
+10.0.0.5 lan.local
+127.0.0.1 commented.local # trailing comment
+# 127.0.0.1 disabled.local
+HOSTS
+  for case in "both.local:no" "pure.local:yes" "lan.local:no" \
+              "commented.local:yes" "disabled.local:no" "absent.local:no"; do
+    fn hosts_maps_to_loopback "${case%%:*}" "$hf"
+    [ "$output" = "${case##*:}" ] || { echo "failed for $case: got $output"; return 1; }
+  done
+}
+
+@test "the hosts-file argument is a test seam only" {
+  # nothing in the script itself passes a second argument
+  run bash -c "grep -cE 'hosts_maps_to_loopback \"[^\"]*\" +\"' '$SCRIPT'"
+  [ "$output" = "0" ]
 }
 
 @test "Local mode checks its domain before sending a credential to it" {
