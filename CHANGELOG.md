@@ -18,7 +18,7 @@ AIG rated it High; the rest of its report is overrides of its own scanners.
   it, in plaintext, on every request. `wp-config.php` proves the site's *files*
   are here; it says nothing about where its HTTP endpoint is. The wizard now
   requires a loopback literal, an RFC 6761 `localhost` name, **or** an
-  `/etc/hosts` entry pointing at loopback — which is what Local writes for its
+  hosts-file entry pointing at loopback — which is what Local writes for its
   sites, and is stronger evidence than a DNS lookup, because the system resolver
   consults that file first and editing it needs root. Without one it refuses,
   naming `WP_ALLOW_HTTP=<host>` as the deliberate opt-in.
@@ -34,7 +34,13 @@ AIG rated it High; the rest of its report is overrides of its own scanners.
   *both* MCP plugins; the script removes the standalone adapter (ClawScan
   SDI-4).
 
-76 tests.
+**Windows:** the hosts-file check reads `%WINDIR%\System32\drivers\etc\hosts`
+under Git Bash (via `cygpath`), because Local updates the Windows resolver file
+and MSYS's `/etc/hosts` is not guaranteed to be it — reading the wrong one would
+report a legitimate Local domain as unmapped and abort. Implemented, not
+verified on a real Windows machine, like the rest of that path.
+
+79 tests.
 
 **Not changed:** the plugin download still defaults to `releases/latest` rather
 than a pinned tag. Pinning by default would strand users on whatever version the

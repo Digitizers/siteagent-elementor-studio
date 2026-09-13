@@ -101,7 +101,16 @@ valid_host(){
 # arg2 is the hosts file, for the tests; nothing in this script passes it.
 hosts_maps_to_loopback(){
   _hh=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
-  _hf="${2:-/etc/hosts}"
+  # On Git Bash, Local updates the WINDOWS resolver file; /etc/hosts there is a
+  # MSYS overlay that is not guaranteed to be it, so reading it would report a
+  # legitimate Local domain as unmapped and abort. (Windows path: implemented,
+  # not verified on a real machine - see the Windows note in CHANGELOG.)
+  if [ -z "${2:-}" ] && [ "$(is_windows_bash)" = "yes" ]; then
+    _hf=$(cygpath "${WINDIR:-C:\\Windows}/System32/drivers/etc/hosts" 2>/dev/null \
+          || printf '%s' "/c/Windows/System32/drivers/etc/hosts")
+  else
+    _hf="${2:-/etc/hosts}"
+  fi
   [ -n "$_hh" ] || { printf 'no'; return; }
   [ -r "$_hf" ] || { printf 'no'; return; }
   # EVERY mapping for the name must be loopback, not merely one of them. The
@@ -110,13 +119,25 @@ hosts_maps_to_loopback(){
   # reaches the LAN address the moment the local site is stopped, with the proxy
   # bypassed and the plaintext refusal waived. Stopping at the first loopback
   # match answered "yes" for exactly that host.
+  # A "127." PREFIX is not an address. "127.invalid" and "127.0.0.256" are not
+  # loopback and not valid, so the resolver ignores those lines and may fall
+  # through to DNS/mDNS - while a prefix match would have called the host local,
+  # bypassed the proxy and waived the plaintext refusal. Same mistake the
+  # is_local_host glob made; it needs a real dotted quad here too.
   awk -v want="$_hh" '
+    function is_loopback(a,   p, i) {
+      if (a == "::1") return 1
+      if (a !~ /^127\.[0-9]+\.[0-9]+\.[0-9]+$/) return 0
+      split(a, p, ".")
+      for (i = 2; i <= 4; i++) if (p[i] + 0 > 255) return 0
+      return 1
+    }
     { sub(/#.*/, "") }
     NF < 2 { next }
     {
       for (i = 2; i <= NF; i++) if (tolower($i) == want) {
         seen = 1
-        if ($1 !~ /^127\./ && $1 != "::1") bad = 1
+        if (!is_loopback($1)) bad = 1
       }
     }
     END { exit(seen && !bad ? 0 : 1) }

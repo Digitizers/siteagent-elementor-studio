@@ -492,12 +492,38 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
 10.0.0.5 lan.local
 127.0.0.1 commented.local # trailing comment
 # 127.0.0.1 disabled.local
+127.0.0.256 bad256.local
+127.invalid badname.local
+127.0.0 short.local
+127.1.2.3 highoctet.local
 HOSTS
   for case in "both.local:no" "pure.local:yes" "lan.local:no" \
-              "commented.local:yes" "disabled.local:no" "absent.local:no"; do
+              "commented.local:yes" "disabled.local:no" "absent.local:no" \
+              "bad256.local:no" "badname.local:no" "short.local:no" \
+              "highoctet.local:yes"; do
     fn hosts_maps_to_loopback "${case%%:*}" "$hf"
     [ "$output" = "${case##*:}" ] || { echo "failed for $case: got $output"; return 1; }
   done
+}
+
+@test "a 127. PREFIX is not a loopback address" {
+  # the third time this exact mistake appeared in this file: a name like
+  # 127.invalid or 127.0.0.256 is not an address at all, so the resolver
+  # ignores that line and may fall through to DNS - while a prefix match called
+  # the host local, bypassed the proxy and waived the plaintext refusal
+  run bash -c "sed -n '/^hosts_maps_to_loopback()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"function is_loopback"* ]]
+  [[ "$output" != *'$1 !~ /^127\./'* ]]
+}
+
+@test "Git Bash reads the Windows resolver file" {
+  # Local updates %WINDIR%\System32\drivers\etc\hosts there; MSYS's /etc/hosts
+  # is not guaranteed to be it, so reading it would report a legitimate Local
+  # domain as unmapped and abort. (Windows: implemented, not verified.)
+  run bash -c "sed -n '/^hosts_maps_to_loopback()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"is_windows_bash"* ]]
+  [[ "$output" == *"cygpath"* ]]
+  [[ "$output" == *"System32/drivers/etc/hosts"* ]]
 }
 
 @test "the hosts-file argument is a test seam only" {
