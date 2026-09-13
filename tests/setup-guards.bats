@@ -572,3 +572,30 @@ HOSTS
   run bash -c "grep -c 'reactivate both MCP plugins' '$SCRIPT'"
   [ "$output" = "0" ]
 }
+
+@test "the hosts file counts only when the resolver reads it first" {
+  # glibc takes its order from /etc/nsswitch.conf: a "hosts:" line putting dns
+  # or mdns before "files" means curl can get a routable address without
+  # /etc/hosts being consulted at all, while a direct scan still says loopback.
+  ns="$BATS_TEST_TMPDIR/ns"
+  mkdir -p "$ns"
+  printf 'hosts: files dns\n'                                > "$ns/good"
+  printf 'hosts: dns files\n'                                > "$ns/dnsfirst"
+  printf 'hosts: mdns4_minimal [NOTFOUND=return] files dns\n' > "$ns/mdnsfirst"
+  printf 'hosts: files mdns4 dns\n'                          > "$ns/filesfirst"
+  printf 'passwd: files\n'                                   > "$ns/nohostsline"
+  for case in "good:yes" "dnsfirst:no" "mdnsfirst:no" "filesfirst:yes" "nohostsline:yes"; do
+    fn hosts_file_is_authoritative "$ns/${case%%:*}"
+    [ "$output" = "${case##*:}" ] || { echo "failed for $case: got $output"; return 1; }
+  done
+  # absent file: macOS and the BSDs have none and resolve the hosts file first
+  fn hosts_file_is_authoritative "$ns/definitely-absent"
+  [ "$output" = "yes" ]
+}
+
+@test "the resolver-order check gates the real hosts file only" {
+  # a caller-supplied hosts file is the test seam; nsswitch says nothing about it
+  run bash -c "sed -n '/^hosts_maps_to_loopback()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"hosts_file_is_authoritative"* ]]
+  [[ "$output" == *'-z "${2:-}"'* ]]
+}

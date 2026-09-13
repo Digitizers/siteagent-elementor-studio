@@ -40,7 +40,13 @@ and MSYS's `/etc/hosts` is not guaranteed to be it — reading the wrong one wou
 report a legitimate Local domain as unmapped and abort. Implemented, not
 verified on a real Windows machine, like the rest of that path.
 
-80 tests.
+The hosts file counts as evidence only when the resolver reads it FIRST: glibc
+takes its order from `/etc/nsswitch.conf`, and a `hosts:` line putting `dns` or
+`mdns` ahead of `files` means curl can get a routable address without
+`/etc/hosts` being consulted at all. No `nsswitch.conf` (macOS, the BSDs) means
+the system resolves it first by its own default.
+
+82 tests.
 
 **Not changed:** the plugin download still defaults to `releases/latest` rather
 than a pinned tag. Pinning by default would strand users on whatever version the

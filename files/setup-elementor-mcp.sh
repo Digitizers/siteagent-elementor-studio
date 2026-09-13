@@ -98,6 +98,32 @@ valid_host(){
 #
 # The residual limit is honest and narrow: the file can be edited after setup,
 # by root.
+# arg1 (optional, tests only): the nsswitch.conf to read.
+#
+# The hosts file is only evidence if the resolver READS it first. glibc takes
+# its order from /etc/nsswitch.conf, and a "hosts:" line that puts dns, mdns or
+# another network source before "files" means curl can get a routable address
+# without /etc/hosts ever being consulted - while a direct scan of that file
+# still says loopback. No nsswitch.conf (macOS, the BSDs) means the system
+# resolves the hosts file first by its own default, which is the case this
+# check is written around.
+hosts_file_is_authoritative(){
+  _ns="${1:-/etc/nsswitch.conf}"
+  [ -r "$_ns" ] || { printf 'yes'; return; }
+  _line=$(awk '/^[[:space:]]*hosts:/ { sub(/^[[:space:]]*hosts:/, ""); sub(/#.*/, ""); print; exit }' "$_ns")
+  # No hosts: line at all -> glibc falls back to "files dns".
+  [ -n "$_line" ] || { printf 'yes'; return; }
+  for _src in $_line; do
+    case "$_src" in
+      files) printf 'yes'; return ;;
+      \[*|*\]) continue ;;   # action specifiers, e.g. [NOTFOUND=return]
+      dns|mdns*|resolve|nis*|ldap|myhostname) printf 'no'; return ;;
+      *) continue ;;
+    esac
+  done
+  printf 'yes'
+}
+
 # arg2 is the hosts file, for the tests; nothing in this script passes it.
 hosts_maps_to_loopback(){
   _hh=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
@@ -113,6 +139,11 @@ hosts_maps_to_loopback(){
   fi
   [ -n "$_hh" ] || { printf 'no'; return; }
   [ -r "$_hf" ] || { printf 'no'; return; }
+  # Only for the real file: a caller-supplied one is the test seam, and the
+  # resolver order says nothing about it.
+  if [ -z "${2:-}" ] && [ "$(hosts_file_is_authoritative)" != "yes" ]; then
+    printf 'no'; return
+  fi
   # EVERY mapping for the name must be loopback, not merely one of them. The
   # resolver hands curl all of a name's addresses, and curl tries the next one
   # when a connection fails - so a name with both 127.0.0.1 and a LAN address
