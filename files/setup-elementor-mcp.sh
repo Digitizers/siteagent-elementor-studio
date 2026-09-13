@@ -87,63 +87,36 @@ valid_host(){
   esac
 }
 
-# arg1: host -> "yes" when the traffic provably cannot leave this machine.
+# arg1: host -> "yes" when the traffic provably cannot leave this machine,
+# for as long as the config written here keeps being used.
 #
-# A SUFFIX is not that proof. ".local" is mDNS: "wordpress.local" commonly
-# resolves to another machine on the LAN, and ".test" resolves to whatever the
-# resolver was told. Treating either as local waived the plaintext refusal AND
-# bypassed proxies, so the reusable application password would have crossed a
-# real network in the clear while the wizard reported the host as local.
+# Two things are NOT proof. A SUFFIX is not: ".local" is mDNS, and
+# "wordpress.local" commonly resolves to another machine on the LAN. And a
+# LOOKUP is not either, which is the subtler one - .mcp.json persists the
+# HOSTNAME and the credential, and the MCP server resolves that name again on
+# every later request. A name that answers 127.0.0.1 during setup can answer a
+# routable address afterwards: an /etc/hosts line removed, an mDNS answer
+# changed, a rebinding record. The credential would then travel in the clear,
+# with the opt-in never asked for, because a lookup minutes earlier had said
+# loopback.
 #
-# Only an address that IS loopback counts. An IP literal is read directly; a
-# name is resolved, and EVERY address it resolves to must be loopback - one
-# routable answer is enough to refuse. "localhost" and *.localhost are loopback
-# by RFC 6761, so they are answered without a lookup. 0.0.0.0 is unspecified,
-# which as a destination means this machine.
+# So only what is STABLE counts: a loopback IP literal, which resolves to
+# nothing because it is already an address, and localhost / *.localhost, which
+# are loopback by RFC 6761. Every other name - including a Local-by-Flywheel
+# .local typed into LIVE-HOST mode - needs an explicit WP_ALLOW_HTTP entry.
 #
-# Failure is "no": an unresolvable name, a missing python3, a lookup that hangs
-# past the alarm. Local-by-Flywheel does not depend on this - choosing that mode
-# sets SITE_IS_LOCAL itself - so a refusal here only ever affects a URL someone
-# typed into live-host mode.
+# Local-by-Flywheel itself is untouched: choosing Local mode sets
+# SITE_IS_LOCAL directly and never reaches the refusal this feeds.
+#
+# No lookup means no network, which keeps this helper pure and testable - and
+# retires the SIGALRM problem native Windows Python had with the resolving
+# version.
 is_local_host(){
-  _h="${1:-}"
-  case "$_h" in
-    localhost|*.localhost) printf 'yes'; return ;;
-    "") printf 'no'; return ;;
+  case "${1:-}" in
+    localhost|*.localhost) printf 'yes' ;;
+    127.*|::1|0.0.0.0|::) printf 'yes' ;;
+    *) printf 'no' ;;
   esac
-  python3 - "$_h" <<'PY' 2>/dev/null || printf 'no'
-import ipaddress, signal, socket, sys
-
-def bail(*_):
-    print('no')
-    sys.exit(0)
-
-host = sys.argv[1]
-# An IP literal is decided without a lookup, so it is answered BEFORE any
-# timeout machinery - and needs none.
-try:
-    literal = ipaddress.ip_address(host)
-except ValueError:
-    literal = None
-if literal is not None:
-    print('yes' if literal.is_loopback or literal.is_unspecified else 'no')
-    sys.exit(0)
-# SIGALRM does not exist on native Windows Python; there the lookup runs
-# without a deadline rather than the whole check failing closed on an
-# AttributeError - which would have refused 127.0.0.1 itself.
-if hasattr(signal, 'SIGALRM'):
-    signal.signal(signal.SIGALRM, bail)
-    signal.alarm(3)
-try:
-    addresses = {info[4][0].split('%')[0] for info in socket.getaddrinfo(host, None)}
-except OSError:
-    bail()
-try:
-    ok = bool(addresses) and all(ipaddress.ip_address(a).is_loopback for a in addresses)
-except ValueError:
-    ok = False
-print('yes' if ok else 'no')
-PY
 }
 
 # The local-host exemption rests on the traffic never leaving the machine. A

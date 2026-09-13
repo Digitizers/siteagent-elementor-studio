@@ -39,18 +39,26 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   done
 }
 
-@test "a .local name that resolves to loopback is still local" {
-  # Local-by-Flywheel writes its sites into /etc/hosts, so the common case keeps
-  # working - it is the ADDRESS that decides, not the suffix.
+@test "a name that merely resolves to loopback is not enough" {
+  # .mcp.json persists the HOSTNAME, and the MCP server resolves it again on
+  # every later request - so a lookup during setup proves nothing about them. A
+  # hosts entry removed, an mDNS answer changed, a rebinding record, and the
+  # credential travels in the clear with the opt-in never asked for.
   h=$(awk '$1=="127.0.0.1" && $2 ~ /\.local$/ {print $2; exit}' /etc/hosts)
   [ -n "$h" ] || skip "no 127.0.0.1 .local entry in /etc/hosts on this machine"
   fn http_verdict "http://$h"
-  [ "$output" = "local" ]
+  [ "$output" = "refused" ]
+  # and naming it is the way through
+  WP_ALLOW_HTTP="$h" fn http_verdict "http://$h"
+  [ "$output" = "named" ]
 }
 
-@test "an unresolvable name is refused, not assumed local" {
-  fn http_verdict "http://definitely-no-such-host-98f3a1.invalid"
-  [ "$output" = "refused" ]
+@test "locality is decided without a lookup" {
+  # no network in this helper: it is pure, which is also why native Windows
+  # Python's missing SIGALRM stopped being a concern here
+  run bash -c "sed -n '/^is_local_host()/,/^}/p' '$SCRIPT'"
+  [[ "$output" != *"getaddrinfo"* ]]
+  [[ "$output" != *"python3"* ]]
 }
 
 @test "naming the host permits it" {
@@ -396,13 +404,10 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
 }
 
 @test "the loopback test fails closed" {
-  # an unresolvable name, and an address that is routable
-  fn is_local_host "definitely-no-such-host-98f3a1.invalid"
-  [ "$output" = "no" ]
-  fn is_local_host "1.1.1.1"
-  [ "$output" = "no" ]
-  fn is_local_host ""
-  [ "$output" = "no" ]
+  for h in definitely-no-such-host-98f3a1.invalid 1.1.1.1 "" softlab.local foo.test; do
+    fn is_local_host "$h"
+    [ "$output" = "no" ] || { echo "failed for ${h:-<empty>}: $output"; return 1; }
+  done
 }
 
 # ---- host shape (Codex, PR #32 round 10) ------------------------------------
@@ -429,12 +434,9 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   [ "$output" -ge 1 ]
 }
 
-@test "an IP literal is decided without any timeout machinery" {
-  # native Windows Python has no signal.SIGALRM, and installing it before the
-  # literal check made the whole test fail closed - refusing 127.0.0.1 itself
-  run bash -c "sed -n '/^is_local_host()/,/^}/p' '$SCRIPT'"
-  [[ "$output" == *"hasattr(signal, 'SIGALRM')"* ]]
-  lit=$(printf '%s\n' "$output" | grep -n 'ipaddress.ip_address(host)' | head -1 | cut -d: -f1)
-  alarm=$(printf '%s\n' "$output" | grep -n 'signal.alarm' | head -1 | cut -d: -f1)
-  [ "$lit" -lt "$alarm" ]
+@test "loopback literals are answered directly" {
+  for h in 127.0.0.1 127.1.2.3 ::1 0.0.0.0 localhost bar.localhost; do
+    fn is_local_host "$h"
+    [ "$output" = "yes" ] || { echo "failed for $h: $output"; return 1; }
+  done
 }

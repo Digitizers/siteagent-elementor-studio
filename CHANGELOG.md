@@ -23,17 +23,22 @@ AIG rated three of these High.
   reusable application password on every request. `WP_ALLOW_HTTP=host` (comma
   separated) permits named hosts. Same rule, same reasoning, as
   wordpress-api-pro 3.9.5.
-- **"Local" means a loopback ADDRESS, not a suffix.** `.local` is mDNS:
-  `wordpress.local` commonly resolves to another machine on the LAN, so
-  exempting the suffix sent the application password across a real network in
-  the clear - and past any proxy - while reporting the host as local. An IP
-  literal is now read directly, a name is resolved, and every address it
-  resolves to must be loopback; `localhost` and `*.localhost` are loopback by
-  RFC 6761 and need no lookup. **This is a behaviour change for live-host
-  mode:** a `.local` or `.test` URL that does not resolve to loopback now needs
-  an explicit `WP_ALLOW_HTTP` entry. Local-by-Flywheel is unaffected — it writes
-  its sites into `/etc/hosts` at 127.0.0.1, and choosing Local mode sets the
-  proxy-bypass flag on its own regardless of the domain the site carries.
+- **The automatic plaintext exemption is now only for STABLE loopback
+  evidence.** It used to be a suffix list, and `.local` is mDNS —
+  `wordpress.local` commonly resolves to another machine on the LAN, so the
+  exemption sent the application password across a real network in the clear,
+  past any proxy, while reporting the host as local. Resolving the name instead
+  is not enough either: `.mcp.json` persists the **hostname** and the
+  credential, and the MCP server resolves it again on every later request, so a
+  lookup during setup proves nothing about them — an `/etc/hosts` line removed,
+  an mDNS answer changed or a rebinding record and the credential travels in
+  the clear, with the opt-in never asked for. The exemption is therefore a
+  loopback IP literal (already an address, nothing left to resolve) or
+  `localhost` / `*.localhost`, which are loopback by RFC 6761. **Behaviour
+  change for live-host mode:** any other name — a Local-by-Flywheel `.local`
+  included — needs an explicit `WP_ALLOW_HTTP` entry. Local-by-Flywheel *mode*
+  is unaffected: choosing it sets the proxy-bypass flag directly, whatever
+  domain the site carries.
 - **`.mcp.json` is created mode 600 before the credential is written to it.**
   Writing first and fixing permissions afterwards leaves a window where the file
   is world-readable on a shared machine.
