@@ -44,7 +44,14 @@ url_host(){
   # A bracketed IPv6 literal (http://[::1]:8080/) must not be cut at its first
   # colon - that returned "[", so ::1 stopped being recognised as loopback and
   # a legitimate local URL was refused.
+  #
+  # Userinfo must not decide the host either: http://localhost:x@remote.example
+  # parsed as "localhost", so the plaintext guard waved it through while the
+  # credentials went to remote.example. Take the authority first (a path can
+  # contain "@"), then drop everything up to the last "@".
   _u=$(printf '%s' "${1:-}" | sed -E 's#^https?://##')
+  _u=${_u%%/*}
+  _u=${_u##*@}
   case "$_u" in
     \[*) printf '%s' "${_u#[}" | sed -E 's#\].*$##' | tr '[:upper:]' '[:lower:]' ;;
     *)   printf '%s' "$_u"      | sed -E 's#[:/].*$##' | tr '[:upper:]' '[:lower:]' ;;
@@ -57,6 +64,18 @@ is_local_host(){
     localhost|127.0.0.1|0.0.0.0|::1|*.local|*.test|*.localhost) printf 'yes' ;;
     *) printf 'no' ;;
   esac
+}
+
+# The local-host exemption rests on the traffic never leaving the machine. A
+# configured http_proxy breaks exactly that: curl would hand the authenticated
+# request to the proxy, in plaintext, over a real network. Every site-directed
+# request goes through here, and a local site bypasses any proxy.
+site_curl(){
+  if [ "${SITE_IS_LOCAL:-no}" = "yes" ]; then
+    curl --noproxy '*' "$@"
+  else
+    curl "$@"
+  fi
 }
 
 # arg1: site URL; env WP_ALLOW_HTTP (comma-separated hosts) ->
@@ -321,7 +340,9 @@ else
   # plaintext http is refused unless the host is a local dev host or the caller
   # names it explicitly - same rule, and the same reasoning, as
   # wordpress-api-pro's WP_ALLOW_HTTP.
-  case "$(http_verdict "$SITE_URL")" in
+  SITE_VERDICT=$(http_verdict "$SITE_URL")
+  [ "$SITE_VERDICT" = "local" ] && SITE_IS_LOCAL=yes
+  case "$SITE_VERDICT" in
     refused)
       abort "Refusing http:// for $(url_host "$SITE_URL") — the application password would travel unencrypted.
   Use https://, or name this host explicitly: WP_ALLOW_HTTP=$(url_host "$SITE_URL") bash setup-elementor-mcp.sh"
@@ -335,7 +356,7 @@ fi
 
 # ---- 3. Connectivity probe ---------------------------------------------------
 step "3/8  Connectivity"
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SITE_URL/wp-json/" || echo "000")
+HTTP_CODE=$(site_curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SITE_URL/wp-json/" || echo "000")
 case "$HTTP_CODE" in
   200|301|302) ok "Reached WP REST API ($HTTP_CODE)" ;;
   000) abort "Could not reach $SITE_URL — is the site running?" ;;
@@ -364,7 +385,7 @@ read -rs WP_APP_PWD
 printf '\n'
 
 # Verify via /users/me
-USERS_ME=$(curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/wp/v2/users/me" || echo "{}")
+USERS_ME=$(site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/wp/v2/users/me" || echo "{}")
 USER_ID=$(echo "$USERS_ME" | jq_lenient '.id' 2>/dev/null || echo "")
 if [ -n "$USER_ID" ] && [ "$USER_ID" != "" ]; then
   USER_NAME=$(echo "$USERS_ME" | jq_lenient '.name')
@@ -414,7 +435,7 @@ else:
 # Updates the global $PLUGINS_JSON so plugin_is_active / plugin_is_installed
 # reflect current state instead of cached snapshot.
 refresh_plugins_json() {
-  PLUGINS_JSON=$(curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 \
+  PLUGINS_JSON=$(site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 \
     "$SITE_URL/wp-json/wp/v2/plugins" || echo "[]")
 }
 
@@ -445,7 +466,7 @@ if isinstance(d, list):
             print(p["plugin"]); break
 ' "$slug" 2>/dev/null)
     if [ -n "$plugin_path" ]; then
-      curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 30 \
+      site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 30 \
         -H "Content-Type: application/json" \
         -X POST "$SITE_URL/wp-json/wp/v2/plugins/$plugin_path" \
         -d '{"status":"active"}' >/dev/null
@@ -453,7 +474,7 @@ if isinstance(d, list):
   else
     info "Installing + activating $label from wordpress.org..."
     local result err
-    result=$(curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 60 \
+    result=$(site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 60 \
       -H "Content-Type: application/json" \
       -X POST "$SITE_URL/wp-json/wp/v2/plugins" \
       -d "{\"slug\":\"$slug\",\"status\":\"active\"}" || echo '{"code":"network_error"}')
@@ -485,7 +506,7 @@ if isinstance(d, list):
             print(p["plugin"]); break
 ' "$slug" 2>/dev/null)
   if [ -n "$plugin_path" ]; then
-    curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 30 \
+    site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 30 \
       -H "Content-Type: application/json" \
       -X POST "$SITE_URL/wp-json/wp/v2/plugins/$plugin_path" \
       -d '{"status":"active"}' >/dev/null
@@ -537,14 +558,14 @@ if isinstance(d, list):
 
   if [ "$(plugin_is_active "$slug")" = "yes" ]; then
     info "Deactivating $label..."
-    curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 30 \
+    site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 30 \
       -H "Content-Type: application/json" \
       -X PUT "$SITE_URL/wp-json/wp/v2/plugins/$plugin_path" \
       -d '{"status":"inactive"}' >/dev/null
   fi
 
   info "Deleting $label..."
-  curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 30 \
+  site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 30 \
     -X DELETE "$SITE_URL/wp-json/wp/v2/plugins/$plugin_path" >/dev/null
 
   refresh_plugins_json
@@ -563,7 +584,7 @@ install_wp_theme() {
   local label="$2"
   info "Installing $label theme from wordpress.org..."
   local result
-  result=$(curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 60 \
+  result=$(site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 60 \
     -H "Content-Type: application/json" \
     -X POST "$SITE_URL/wp-json/wp/v2/themes" \
     -d "{\"slug\":\"$slug\"}" 2>&1 || echo '{}')
@@ -574,8 +595,8 @@ install_wp_theme() {
 }
 
 # Fetch current state once
-PLUGINS_JSON=$(curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/wp/v2/plugins" || echo "[]")
-THEME_JSON=$(curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/wp/v2/themes?status=active" || echo "[]")
+PLUGINS_JSON=$(site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/wp/v2/plugins" || echo "[]")
+THEME_JSON=$(site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/wp/v2/themes?status=active" || echo "[]")
 ACTIVE_THEME=$(echo "$THEME_JSON" | python3 -c "$JQ_LENIENT_PY"'
 import sys
 d = _load(sys.stdin.read())
@@ -732,7 +753,7 @@ ver_lt() {
   [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$1" ]
 }
 
-NS_JSON=$(curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/" || echo "{}")
+NS_JSON=$(site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/" || echo "{}")
 HAS_MCP=$(echo "$NS_JSON" | jq_lenient_contains '.namespaces' 'mcp' 2>/dev/null || echo "no")
 HAS_OLD_ADAPTER=$(plugin_is_installed "mcp-adapter")
 EMCP_VER=$(emcp_installed_version)
@@ -940,7 +961,7 @@ sleep 2
 
 verify_mcp_namespace() {
   local ns_json
-  ns_json=$(curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/" || echo "{}")
+  ns_json=$(site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/" || echo "{}")
   local has_mcp has_em
   has_mcp=$(echo "$ns_json" | jq_lenient_contains '.namespaces' 'mcp' 2>/dev/null || echo "no")
   has_em=$(echo "$ns_json" | jq_lenient_contains '.routes' 'elementor-mcp-server' 2>/dev/null || echo "no")

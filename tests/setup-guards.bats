@@ -171,3 +171,48 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   [[ "$output" == *"icacls \"\$_win\" /inheritance:r /grant:r"* ]]
 }
 
+# ---- userinfo (Codex, PR #32): a real bypass of the plaintext guard ----------
+@test "userinfo cannot impersonate a local host" {
+  fn url_host "http://localhost:x@remote.example/"
+  [ "$output" = "remote.example" ]
+  fn http_verdict "http://localhost:x@remote.example/"
+  [ "$output" = "refused" ]
+}
+
+@test "a bare user@ prefix is stripped too" {
+  fn url_host "http://user@evil.example/"
+  [ "$output" = "evil.example" ]
+}
+
+@test "userinfo before a genuinely local host still reads as local" {
+  fn http_verdict "http://admin@mysite.local/"
+  [ "$output" = "local" ]
+}
+
+@test "an @ in the path is not mistaken for userinfo" {
+  fn url_host "https://example.com/path@nothost"
+  [ "$output" = "example.com" ]
+}
+
+@test "userinfo before an IPv6 literal is handled" {
+  fn url_host "http://user@[::1]:8080/"
+  [ "$output" = "::1" ]
+}
+
+# ---- proxies (Codex, PR #32): the local exemption assumes no wire -----------
+@test "site requests go through site_curl, not bare curl" {
+  # The local exemption rests on the traffic staying on the machine; a
+  # configured http_proxy would send the authenticated request over a real
+  # network in plaintext.
+  run bash -c "grep -c 'site_curl -s' '$SCRIPT'"
+  [ "$output" -ge 13 ]
+  run bash -c "grep -n 'curl -s -u \"\$WP_USER' '$SCRIPT' | grep -v site_curl | wc -l | tr -d ' '"
+  [ "$output" = "0" ]
+}
+
+@test "site_curl bypasses the proxy only for a local site" {
+  run bash -c "sed -n '/^site_curl()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"SITE_IS_LOCAL"* ]]
+  [[ "$output" == *"--noproxy"* ]]
+}
+
