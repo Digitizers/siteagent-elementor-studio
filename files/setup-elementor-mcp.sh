@@ -93,6 +93,11 @@ http_verdict(){
   url="${1:-}"
   case "$url" in http://*) ;; *) printf 'ok'; return ;; esac
   host=$(url_host "$url")
+  # Fail closed on an unreadable authority. "http:///remote.example" parses to
+  # an EMPTY host here, and an empty host is a substring of the allowlist's own
+  # separators (",," contains ",,"), so it matched as explicitly named - while
+  # curl normalises that URL to remote.example and sends the credential there.
+  [ -n "$host" ] || { printf 'refused'; return; }
   [ "$(is_local_host "$host")" = "yes" ] && { printf 'local'; return; }
   allowed=",$(printf '%s' "${WP_ALLOW_HTTP:-}" | tr -d ' ' | tr '[:upper:]' '[:lower:]'),"
   case "$allowed" in *",$host,"*) printf 'named' ;; *) printf 'refused' ;; esac
@@ -339,6 +344,10 @@ else
   read -r SITE_URL
   SITE_URL="${SITE_URL%/}"
   [[ "$SITE_URL" =~ ^https?:// ]] || abort "URL must start with http:// or https://"
+  # A scheme alone is not a URL: "http:///example.com" passes the regex above and
+  # leaves no readable host. Say so here rather than letting http_verdict's
+  # refusal suggest a WP_ALLOW_HTTP entry that could never match.
+  [ -n "$(url_host "$SITE_URL")" ] || abort "Could not read a host from $SITE_URL — check for a typo (an extra slash after the scheme, perhaps)."
   # A live-host run sends a reusable application password on every request, so
   # plaintext http is refused unless the host is a local dev host or the caller
   # names it explicitly - same rule, and the same reasoning, as
@@ -360,8 +369,12 @@ fi
 # SITE_URL. Setting the flag in the live-host branch alone left every
 # Local-by-Flywheel run - the common case - talking to its site through a
 # configured proxy.
+# Local mode is itself the evidence: choosing it establishes that the site is
+# hosted on this machine, whatever domain it carries. A Local site with a custom
+# domain (project.dev, say, from sites.json) is not in is_local_host's suffix
+# list, so testing the URL alone left it talking through a configured proxy.
 SITE_IS_LOCAL=no
-[ "$(http_verdict "$SITE_URL")" = "local" ] && SITE_IS_LOCAL=yes
+{ [ "$MODE" = "local" ] || [ "$(http_verdict "$SITE_URL")" = "local" ]; } && SITE_IS_LOCAL=yes
 
 step "3/8  Connectivity"
 HTTP_CODE=$(site_curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SITE_URL/wp-json/" || echo "000")

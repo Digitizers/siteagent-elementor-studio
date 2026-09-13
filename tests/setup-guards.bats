@@ -247,3 +247,52 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   [ "$set_line" -lt "$probe_line" ]
 }
 
+
+# ---- an unreadable authority (Codex, PR #32 round 7) -------------------------
+@test "an empty host is refused, not read as an allowlist match" {
+  # "http:///remote.example" leaves no host, and an empty host is a substring of
+  # the allowlist's own separators - ",," contains ",," - so it matched as
+  # explicitly named while curl normalised the URL to remote.example.
+  fn url_host "http:///remote.example"
+  [ "$output" = "" ]
+  fn http_verdict "http:///remote.example"
+  [ "$output" = "refused" ]
+}
+
+@test "an empty host stays refused whatever the allowlist holds" {
+  WP_ALLOW_HTTP=a.example fn http_verdict "http:///remote.example"
+  [ "$output" = "refused" ]
+  # an empty ENTRY cannot open the hole from the other side either
+  WP_ALLOW_HTTP="a.example,,b.example" fn http_verdict "http:///x"
+  [ "$output" = "refused" ]
+}
+
+@test "a scheme with no authority at all is refused" {
+  fn http_verdict "http://"
+  [ "$output" = "refused" ]
+}
+
+@test "a named host still matches after the empty-host guard" {
+  WP_ALLOW_HTTP=a.example fn http_verdict "http://a.example"
+  [ "$output" = "named" ]
+}
+
+@test "the live-host branch rejects a URL with no readable host" {
+  run bash -c "grep -n 'Could not read a host from' '$SCRIPT'"
+  [ "$status" -eq 0 ]
+  # it must run before http_verdict's refusal, whose hint names WP_ALLOW_HTTP -
+  # advice that cannot work for a URL with no host to name
+  host_line=$(grep -n 'Could not read a host from' "$SCRIPT" | head -1 | cut -d: -f1)
+  verdict_line=$(grep -n 'case "$(http_verdict "$SITE_URL")" in' "$SCRIPT" | head -1 | cut -d: -f1)
+  [ "$host_line" -lt "$verdict_line" ]
+}
+
+@test "Local mode bypasses the proxy whatever domain the site carries" {
+  # A Local site with a custom domain (project.dev from sites.json) is not in
+  # is_local_host's suffix list, so testing the URL alone left the common mode
+  # talking to its site through a configured proxy.
+  fn http_verdict "http://project.dev"
+  [ "$output" = "refused" ]
+  run bash -c "sed -n '/^SITE_IS_LOCAL=no/,+1p' '$SCRIPT'"
+  [[ "$output" == *'"$MODE" = "local"'* ]]
+}
