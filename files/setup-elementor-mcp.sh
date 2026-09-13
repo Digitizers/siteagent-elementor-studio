@@ -87,6 +87,32 @@ valid_host(){
   esac
 }
 
+# arg1: host -> "yes" when /etc/hosts maps it to a loopback address.
+#
+# This is the evidence a Local-by-Flywheel site actually leaves behind: Local
+# writes its sites into /etc/hosts at 127.0.0.1. It is stronger evidence than a
+# DNS lookup, because the system resolver consults this file FIRST - so the
+# entry decides where curl connects - and editing it needs root, at which point
+# the machine is already lost. A name with NO such entry is left to DNS/mDNS,
+# where any responder on the LAN can answer, which is the case this rules out.
+#
+# The residual limit is honest and narrow: the file can be edited after setup,
+# by root.
+hosts_maps_to_loopback(){
+  _hh=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
+  [ -n "$_hh" ] || { printf 'no'; return; }
+  [ -r /etc/hosts ] || { printf 'no'; return; }
+  awk -v want="$_hh" '
+    { sub(/#.*/, "") }
+    NF < 2 { next }
+    {
+      if ($1 !~ /^127\./ && $1 != "::1") next
+      for (i = 2; i <= NF; i++) if (tolower($i) == want) { found = 1; exit }
+    }
+    END { exit(found ? 0 : 1) }
+  ' /etc/hosts && printf 'yes' || printf 'no'
+}
+
 # arg1: host -> "yes" when the traffic provably cannot leave this machine,
 # for as long as the config written here keeps being used.
 #
@@ -425,6 +451,26 @@ PY
     SITE_URL="http://${SITE_NAME}.local"
   fi
   [ -f "$SITE_PATH/wp-config.php" ] || abort "No wp-config.php at $SITE_PATH (is the site name correct? check Local)"
+  # wp-config.php proves the site's FILES are here. It does not prove its HTTP
+  # endpoint is: the domain comes from Local's own metadata, and a name with no
+  # /etc/hosts entry is resolved by DNS/mDNS, where any responder on the LAN can
+  # answer - and this run sends a reusable application password on every
+  # request, in plaintext. Choosing "Local" is an assertion; this checks it.
+  _local_host=$(url_host "$SITE_URL")
+  if [ "$(is_local_host "$_local_host")" != "yes" ] \
+     && [ "$(hosts_maps_to_loopback "$_local_host")" != "yes" ]; then
+    case "$(http_verdict "$SITE_URL")" in
+      named)
+        warn "Local site '$_local_host' has no loopback entry in /etc/hosts — its traffic may leave this machine, and WP_ALLOW_HTTP names it, so continuing over plaintext http."
+        ;;
+      *)
+        abort "Refusing http:// for $_local_host — Local reports this domain, but nothing on this machine maps it to loopback,
+  so the application password could travel unencrypted to whatever answers for it on the network.
+  Start the site in Local (it writes the /etc/hosts entry), or name the host explicitly:
+      WP_ALLOW_HTTP='$_local_host' bash \"$SELF\""
+        ;;
+    esac
+  fi
   ok "Site path:  $SITE_PATH"
   ok "Site URL:   $SITE_URL"
 else
@@ -457,12 +503,18 @@ fi
 # SITE_URL. Setting the flag in the live-host branch alone left every
 # Local-by-Flywheel run - the common case - talking to its site through a
 # configured proxy.
-# Local mode is itself the evidence: choosing it establishes that the site is
-# hosted on this machine, whatever domain it carries. A Local site with a custom
-# domain (project.dev, say, from sites.json) is not in is_local_host's suffix
-# list, so testing the URL alone left it talking through a configured proxy.
+# The proxy bypass follows the same EVIDENCE the plaintext decision does, not
+# the mode the user picked. Choosing "Local" used to be enough on its own, but a
+# domain out of Local's metadata is an assertion, not proof - and bypassing the
+# proxy for a host that turns out to be on the LAN sends the credential there
+# directly. A loopback literal, an RFC 6761 localhost name, or an /etc/hosts
+# entry pointing at loopback: any of those, in either mode.
 SITE_IS_LOCAL=no
-{ [ "$MODE" = "local" ] || [ "$(http_verdict "$SITE_URL")" = "local" ]; } && SITE_IS_LOCAL=yes
+_site_host=$(url_host "$SITE_URL")
+if [ "$(is_local_host "$_site_host")" = "yes" ] \
+   || [ "$(hosts_maps_to_loopback "$_site_host")" = "yes" ]; then
+  SITE_IS_LOCAL=yes
+fi
 
 step "3/8  Connectivity"
 HTTP_CODE=$(site_curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SITE_URL/wp-json/" || echo "000")
@@ -978,9 +1030,16 @@ print((a[0].get("digest") or "").replace("sha256:","") if a else "")
   Nothing was installed. Re-run; if it persists, the download is being tampered with or the release was replaced."
     fi
     ok "Download verified (sha256 ${EM_ACTUAL:0:12}…)${EMCP_EXPECTED_SHA256:+ against EMCP_EXPECTED_SHA256}"
+  elif [ "${EMCP_ALLOW_UNVERIFIED:-0}" = "1" ]; then
+    warn "This release publishes no sha256 for its asset, and EMCP_ALLOW_UNVERIFIED=1 is set — installing an UNVERIFIED download."
   else
-    warn "This release publishes no sha256 for its asset — installing an UNVERIFIED download."
-    info "  Pin it instead: EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> bash \"$SELF\""
+    abort "This release publishes no sha256 for its asset, so the download cannot be verified.
+  The archive is about to be installed and ACTIVATED as PHP on your WordPress site, so it is not installed.
+  Supply a digest obtained out of band — which is the stronger check anyway, since a release's own
+  digest travels in the same response as its URL:
+      EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> bash \"$SELF\"
+  Or, to accept an unverified download deliberately:
+      EMCP_ALLOW_UNVERIFIED=1 bash \"$SELF\""
   fi
 
   # Repack with clean folder name (zipballs have ugly hash-suffixed dirs)
@@ -1113,7 +1172,7 @@ EOF
     else
       warn "Still not seeing the MCP namespace."
       info "Things to try, in order:"
-      info "  1. WP Admin → Plugins: deactivate then reactivate both MCP plugins"
+      info "  1. WP Admin → Plugins: deactivate then reactivate Elementor MCP"
       info "  2. Check WP Admin → Plugins for any error notices at the top"
       info "  3. WP Admin → Settings → Permalinks → Save (flushes rewrites)"
       info "  4. Restart your Local site (stop + start)"

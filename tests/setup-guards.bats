@@ -316,18 +316,21 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   # it must run before http_verdict's refusal, whose hint names WP_ALLOW_HTTP -
   # advice that cannot work for a URL with no host to name
   host_line=$(grep -n 'Could not read a hostname from' "$SCRIPT" | head -1 | cut -d: -f1)
-  verdict_line=$(grep -n 'case "$(http_verdict "$SITE_URL")" in' "$SCRIPT" | head -1 | cut -d: -f1)
+  # the LIVE-HOST verdict, not the Local-mode one that now precedes it
+  verdict_line=$(grep -n 'case "$(http_verdict "$SITE_URL")" in' "$SCRIPT" | tail -1 | cut -d: -f1)
   [ "$host_line" -lt "$verdict_line" ]
 }
 
-@test "Local mode bypasses the proxy whatever domain the site carries" {
-  # A Local site with a custom domain (project.dev from sites.json) is not in
-  # is_local_host's suffix list, so testing the URL alone left the common mode
-  # talking to its site through a configured proxy.
+@test "the proxy bypass is decided for both modes at one place" {
+  # It used to be set in the live-host branch alone, which left every
+  # Local-by-Flywheel run talking to its site through a configured proxy; then
+  # it keyed on MODE=local, which trusted a domain out of Local's metadata
+  # rather than checking it. It is now one evidence test, reached by both modes.
   fn http_verdict "http://project.dev"
   [ "$output" = "refused" ]
-  run bash -c "sed -n '/^SITE_IS_LOCAL=no/,+1p' '$SCRIPT'"
-  [[ "$output" == *'"$MODE" = "local"'* ]]
+  set_line=$(grep -n '^SITE_IS_LOCAL=no' "$SCRIPT" | cut -d: -f1)
+  probe_line=$(grep -n '3/8  Connectivity' "$SCRIPT" | cut -d: -f1)
+  [ "$set_line" -lt "$probe_line" ]
 }
 
 # ---- inherited ACLs and retry hints (Codex, PR #32 round 8) ------------------
@@ -457,4 +460,53 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
     fn is_local_host "$h"
     [ "$output" = "yes" ] || { echo "failed for $h: $output"; return 1; }
   done
+}
+
+# ---- ClawHub audit of 1.5.0 --------------------------------------------------
+@test "a Local domain is trusted only with a loopback entry in /etc/hosts" {
+  # Local writes its sites into /etc/hosts at 127.0.0.1; a name with no such
+  # entry is left to DNS/mDNS, where any responder on the LAN can answer.
+  h=$(awk '$1=="127.0.0.1" && $2 ~ /\.local$/ {print $2; exit}' /etc/hosts)
+  if [ -n "$h" ]; then
+    fn hosts_maps_to_loopback "$h"
+    [ "$output" = "yes" ]
+  fi
+  for miss in no-such-host-4b1c9a.local example.com ""; do
+    fn hosts_maps_to_loopback "$miss"
+    [ "$output" = "no" ] || { echo "failed for ${miss:-<empty>}: $output"; return 1; }
+  done
+}
+
+@test "a hosts entry pointing somewhere else is not loopback" {
+  # only 127.0.0.0/8 and ::1 count; a LAN address in /etc/hosts must not pass
+  run bash -c "sed -n '/^hosts_maps_to_loopback()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *'$1 !~ /^127\./'* ]]
+  [[ "$output" == *'$1 != "::1"'* ]]
+}
+
+@test "Local mode checks its domain before sending a credential to it" {
+  # wp-config.php proves the FILES are here, not that the HTTP endpoint is
+  cfg=$(grep -n 'No wp-config.php at' "$SCRIPT" | head -1 | cut -d: -f1)
+  chk=$(grep -n 'hosts_maps_to_loopback "\$_local_host"' "$SCRIPT" | head -1 | cut -d: -f1)
+  url=$(grep -n 'ok "Site URL:   \$SITE_URL"' "$SCRIPT" | head -1 | cut -d: -f1)
+  [ -n "$chk" ] && [ "$cfg" -lt "$chk" ] && [ "$chk" -lt "$url" ]
+}
+
+@test "the proxy bypass follows evidence, not the chosen mode" {
+  run bash -c "grep -n 'SITE_IS_LOCAL=yes' '$SCRIPT'"
+  [[ "$output" != *'"$MODE" = "local"'* ]]
+  run bash -c "sed -n '/^SITE_IS_LOCAL=no/,/^fi/p' '$SCRIPT'"
+  [[ "$output" == *"is_local_host"* ]]
+  [[ "$output" == *"hosts_maps_to_loopback"* ]]
+}
+
+@test "an unverifiable download is refused unless opted into" {
+  run bash -c "sed -n '/publishes no sha256/,/^  fi/p' '$SCRIPT'"
+  [[ "$output" == *"abort"* ]]
+  [[ "$output" == *"EMCP_ALLOW_UNVERIFIED"* ]]
+}
+
+@test "the recovery hint does not name a plugin the script removes" {
+  run bash -c "grep -c 'reactivate both MCP plugins' '$SCRIPT'"
+  [ "$output" = "0" ]
 }
