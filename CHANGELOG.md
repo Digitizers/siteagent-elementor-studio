@@ -5,6 +5,62 @@ All notable changes to the siteagent-elementor-studio skill kit are documented h
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the kit is versioned via the `version:` field in `files/SKILL.md`.
 
+## 1.5.0 — 2026-09-13
+
+Security hardening of `setup-elementor-mcp.sh`, from the ClawHub audit of 1.4.0.
+AIG rated three of these High.
+
+- **The downloaded plugin zip is verified before it is unpacked.** The script
+  installs and activates that archive as PHP on a WordPress site, so it now
+  compares it against the sha256 the release API reports for the asset and
+  aborts on a mismatch, with nothing installed. Be clear about what this is and
+  is not: the digest travels in the same response as the URL, so it proves
+  **integrity, not provenance** — a compromised release would publish a matching
+  digest for a malicious asset. `EMCP_EXPECTED_SHA256` takes a digest obtained
+  out of band, which is the provenance check. A release that publishes no digest
+  is installed with an explicit warning rather than silently.
+- **Plaintext `http://` to a non-local host is refused.** A live run sends a
+  reusable application password on every request. `WP_ALLOW_HTTP=host` (comma
+  separated) permits named hosts. Same rule, same reasoning, as
+  wordpress-api-pro 3.9.5.
+- **The automatic plaintext exemption is now only for STABLE loopback
+  evidence.** It used to be a suffix list, and `.local` is mDNS —
+  `wordpress.local` commonly resolves to another machine on the LAN, so the
+  exemption sent the application password across a real network in the clear,
+  past any proxy, while reporting the host as local. Resolving the name instead
+  is not enough either: `.mcp.json` persists the **hostname** and the
+  credential, and the MCP server resolves it again on every later request, so a
+  lookup during setup proves nothing about them — an `/etc/hosts` line removed,
+  an mDNS answer changed or a rebinding record and the credential travels in
+  the clear, with the opt-in never asked for. The exemption is therefore a
+  loopback IP literal (already an address, nothing left to resolve) or
+  `localhost` / `*.localhost`, which are loopback by RFC 6761. **Behaviour
+  change for live-host mode:** any other name — a Local-by-Flywheel `.local`
+  included — needs an explicit `WP_ALLOW_HTTP` entry. Local-by-Flywheel *mode*
+  is unaffected: choosing it sets the proxy-bypass flag directly, whatever
+  domain the site carries.
+- **`.mcp.json` is created mode 600 before the credential is written to it.**
+  Writing first and fixing permissions afterwards leaves a window where the file
+  is world-readable on a shared machine.
+- **The suggested config printed when the file is not written no longer contains
+  the credential.** It went to the terminal, the scrollback and any screen share;
+  the Basic value is now replaced by a placeholder with the command to produce it.
+
+The helpers behind these guards are unit-tested through the script's
+`--self-test-fn` hook, the same convention `new-client.sh` uses
+(`tests/setup-guards.bats`).
+
+**Windows status: implemented, not verified.** Git Bash on NTFS does not
+implement POSIX mode bits, so the credential file is restricted there with
+`icacls /inheritance:r /grant:r <user>:F` (with `MSYS_NO_PATHCONV` /
+`MSYS2_ARG_CONV_EXCL` set, or Git Bash rewrites the switches into paths). None
+of that has been executed on a Windows machine - the POSIX path is tested, the
+Windows branch is covered only by structural tests that the branching and the
+argument guards are in place. Unverified there: that icacls accepts `$USERNAME`
+as a principal, that `cygpath -w` yields a path it parses, and that `mv`
+preserves our ACL over an existing file. One Git Bash run would settle all
+three.
+
 ## 1.4.0 — 2026-07-21
 
 - **Committed `.mcp.json`** (secrets as placeholders only) — the `elementor` connection now
