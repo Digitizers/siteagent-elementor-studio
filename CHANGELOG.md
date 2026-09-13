@@ -31,9 +31,20 @@ AIG rated three of these High.
   the credential.** It went to the terminal, the scrollback and any screen share;
   the Basic value is now replaced by a placeholder with the command to produce it.
 
-The four helpers behind these guards are unit-tested through the script's
-`--self-test-fn` hook, the same convention `new-client.sh` uses (12 new cases in
-`tests/setup-guards.bats`).
+The helpers behind these guards are unit-tested through the script's
+`--self-test-fn` hook, the same convention `new-client.sh` uses
+(`tests/setup-guards.bats`).
+
+**Windows status: implemented, not verified.** Git Bash on NTFS does not
+implement POSIX mode bits, so the credential file is restricted there with
+`icacls /inheritance:r /grant:r <user>:F` (with `MSYS_NO_PATHCONV` /
+`MSYS2_ARG_CONV_EXCL` set, or Git Bash rewrites the switches into paths). None
+of that has been executed on a Windows machine - the POSIX path is tested, the
+Windows branch is covered only by structural tests that the branching and the
+argument guards are in place. Unverified there: that icacls accepts `$USERNAME`
+as a principal, that `cygpath -w` yields a path it parses, and that `mv`
+preserves our ACL over an existing file. One Git Bash run would settle all
+three.
 
 ## 1.4.0 — 2026-07-21
 
