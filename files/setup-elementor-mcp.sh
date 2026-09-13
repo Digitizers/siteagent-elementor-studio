@@ -112,11 +112,22 @@ valid_host(){
 # retires the SIGALRM problem native Windows Python had with the resolving
 # version.
 is_local_host(){
-  case "${1:-}" in
-    localhost|*.localhost) printf 'yes' ;;
-    127.*|::1|0.0.0.0|::) printf 'yes' ;;
-    *) printf 'no' ;;
+  _h="${1:-}"
+  case "$_h" in
+    localhost|*.localhost) printf 'yes'; return ;;
+    ::1|::|0.0.0.0) printf 'yes'; return ;;
   esac
+  # 127.0.0.0/8 - but only as a genuine dotted quad. The glob "127.*" also
+  # matches the NAME "127.attacker.example", which curl resolves through DNS
+  # like any other host: it would have been waived past the plaintext refusal
+  # and sent the credential to whatever that name points at.
+  if [[ "$_h" =~ ^127\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    for _octet in "${BASH_REMATCH[@]:1}"; do
+      [ "$_octet" -le 255 ] || { printf 'no'; return; }
+    done
+    printf 'yes'; return
+  fi
+  printf 'no'
 }
 
 # The local-host exemption rests on the traffic never leaving the machine. A

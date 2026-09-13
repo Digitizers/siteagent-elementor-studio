@@ -440,3 +440,21 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
     [ "$output" = "yes" ] || { echo "failed for $h: $output"; return 1; }
   done
 }
+
+@test "a NAME that merely starts with 127. is not a loopback literal" {
+  # curl resolves "127.attacker.example" through DNS like any other host; the
+  # glob 127.* waived it past the plaintext refusal and the proxy bypass.
+  for h in 127.attacker.example 127.0.0.1.evil.com 1270.0.0.1 127.0.0.256 127.0.0 127.0.0.1a; do
+    fn is_local_host "$h"
+    [ "$output" = "no" ] || { echo "failed for $h: $output"; return 1; }
+  done
+  fn http_verdict "http://127.attacker.example"
+  [ "$output" = "refused" ]
+}
+
+@test "the whole of 127.0.0.0/8 is still local" {
+  for h in 127.0.0.1 127.1.2.3 127.255.255.255; do
+    fn is_local_host "$h"
+    [ "$output" = "yes" ] || { echo "failed for $h: $output"; return 1; }
+  done
+}
