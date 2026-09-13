@@ -110,18 +110,39 @@ valid_host(){
 hosts_file_is_authoritative(){
   _ns="${1:-/etc/nsswitch.conf}"
   [ -r "$_ns" ] || { printf 'yes'; return; }
-  _line=$(awk '/^[[:space:]]*hosts:/ { sub(/^[[:space:]]*hosts:/, ""); sub(/#.*/, ""); print; exit }' "$_ns")
-  # No hosts: line at all -> glibc falls back to "files dns".
-  [ -n "$_line" ] || { printf 'yes'; return; }
-  for _src in $_line; do
-    case "$_src" in
-      files) printf 'yes'; return ;;
-      \[*|*\]) continue ;;   # action specifiers, e.g. [NOTFOUND=return]
-      dns|mdns*|resolve|nis*|ldap|myhostname) printf 'no'; return ;;
-      *) continue ;;
-    esac
-  done
-  printf 'yes'
+  awk '
+    /^[[:space:]]*hosts:/ {
+      line = tolower($0)
+      sub(/^[[:space:]]*hosts:/, "", line)
+      sub(/#.*/, "", line)
+
+      # Which source answers FIRST. Action clauses are not sources, so drop
+      # them before looking - and they can contain spaces, which is why this
+      # cannot be a token walk that treats "[success=continue" as a word.
+      stripped = line
+      gsub(/\[[^]]*\]/, " ", stripped)
+      n = split(stripped, tok, /[ \t]+/)
+      first = ""
+      for (i = 1; i <= n; i++) if (tok[i] != "") { first = tok[i]; break }
+
+      # Anything but files answering first is a source that can reach the
+      # network before /etc/hosts is consulted - wins, mdns, dns, resolve, or
+      # something this script has never heard of. Fail closed on ALL of them
+      # rather than keeping a list of the ones known to be dangerous.
+      if (first != "files") { print "no"; found = 1; exit }
+
+      # files can answer and STILL not decide it: [SUCCESS=continue] (or
+      # =merge) overrides the default SUCCESS=return, so glibc carries on to
+      # the next source and can come back with a routable address.
+      if (match(line, /files[ \t]*\[[^]]*\]/)) {
+        clause = substr(line, RSTART, RLENGTH)
+        if (clause ~ /success[ \t]*=[ \t]*(continue|merge)/) { print "no"; found = 1; exit }
+      }
+      print "yes"; found = 1; exit
+    }
+    # No hosts: line at all -> glibc falls back to "files dns".
+    END { if (!found) print "yes" }
+  ' "$_ns"
 }
 
 # arg2 is the hosts file, for the tests; nothing in this script passes it.

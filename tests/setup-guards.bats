@@ -579,12 +579,24 @@ HOSTS
   # /etc/hosts being consulted at all, while a direct scan still says loopback.
   ns="$BATS_TEST_TMPDIR/ns"
   mkdir -p "$ns"
-  printf 'hosts: files dns\n'                                > "$ns/good"
-  printf 'hosts: dns files\n'                                > "$ns/dnsfirst"
-  printf 'hosts: mdns4_minimal [NOTFOUND=return] files dns\n' > "$ns/mdnsfirst"
-  printf 'hosts: files mdns4 dns\n'                          > "$ns/filesfirst"
-  printf 'passwd: files\n'                                   > "$ns/nohostsline"
-  for case in "good:yes" "dnsfirst:no" "mdnsfirst:no" "filesfirst:yes" "nohostsline:yes"; do
+  printf 'hosts: files dns\n'                                   > "$ns/good"
+  printf 'hosts: dns files\n'                                   > "$ns/dnsfirst"
+  printf 'hosts: mdns4_minimal [NOTFOUND=return] files dns\n'    > "$ns/mdnsfirst"
+  printf 'hosts: files mdns4 dns\n'                             > "$ns/filesfirst"
+  printf 'passwd: files\n'                                      > "$ns/nohostsline"
+  # an UNKNOWN source before files is not harmless: Samba's wins resolves over
+  # the network, and so may the next name nobody here has heard of
+  printf 'hosts: wins files dns\n'                              > "$ns/winsfirst"
+  printf 'hosts: myhostname files\n'                            > "$ns/myhostfirst"
+  # files can answer and still not decide it
+  printf 'hosts: files [SUCCESS=continue] dns\n'                > "$ns/successcontinue"
+  printf 'hosts: files [SUCCESS=merge] dns\n'                   > "$ns/successmerge"
+  printf 'hosts: files [SUCCESS=continue NOTFOUND=return] dns\n' > "$ns/multikey"
+  printf 'hosts: files [NOTFOUND=return] dns\n'                 > "$ns/notfound"
+  printf '#hosts: dns\nhosts: files\n'                          > "$ns/commented"
+  for case in "good:yes" "dnsfirst:no" "mdnsfirst:no" "filesfirst:yes" "nohostsline:yes" \
+              "winsfirst:no" "myhostfirst:no" "successcontinue:no" "successmerge:no" \
+              "multikey:no" "notfound:yes" "commented:yes"; do
     fn hosts_file_is_authoritative "$ns/${case%%:*}"
     [ "$output" = "${case##*:}" ] || { echo "failed for $case: got $output"; return 1; }
   done
