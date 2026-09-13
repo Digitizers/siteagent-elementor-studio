@@ -5,6 +5,54 @@ All notable changes to the siteagent-elementor-studio skill kit are documented h
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the kit is versioned via the `version:` field in `files/SKILL.md`.
 
+## 1.6.0 — 2026-09-13
+
+From the ClawHub audit of 1.5.0. ClawScan accepted one finding as material and
+AIG rated it High; the rest of its report is overrides of its own scanners.
+
+- **Local mode verifies its domain instead of trusting it.** Choosing
+  "Local-by-Flywheel" used to be treated as proof that the site is on this
+  machine — but the domain comes from Local's own `sites.json` metadata, and a
+  name with no `/etc/hosts` entry is resolved by DNS/mDNS, where any responder
+  on the LAN can answer. The run then sent a reusable application password to
+  it, in plaintext, on every request. `wp-config.php` proves the site's *files*
+  are here; it says nothing about where its HTTP endpoint is. The wizard now
+  requires a loopback literal, an RFC 6761 `localhost` name, **or** an
+  hosts-file entry pointing at loopback — which is what Local writes for its
+  sites, and is stronger evidence than a DNS lookup, because the system resolver
+  consults that file first and editing it needs root. Without one it refuses,
+  naming `WP_ALLOW_HTTP=<host>` as the deliberate opt-in.
+- **The proxy bypass follows the same evidence**, in both modes, rather than the
+  mode the user picked. Bypassing a proxy for a host that turns out to be on the
+  LAN sends the credential straight there.
+- **A download with no published digest is now refused**, not warned about. The
+  archive is installed and activated as PHP on a WordPress site. Set
+  `EMCP_EXPECTED_SHA256` (a digest obtained out of band — the stronger check
+  either way, since a release's own digest travels in the same response as its
+  URL) or opt in deliberately with `EMCP_ALLOW_UNVERIFIED=1`.
+- The "still not seeing the MCP namespace" hint no longer says to reactivate
+  *both* MCP plugins; the script removes the standalone adapter (ClawScan
+  SDI-4).
+
+**Windows:** the hosts-file check reads `%WINDIR%\System32\drivers\etc\hosts`
+under Git Bash (via `cygpath`), because Local updates the Windows resolver file
+and MSYS's `/etc/hosts` is not guaranteed to be it — reading the wrong one would
+report a legitimate Local domain as unmapped and abort. Implemented, not
+verified on a real Windows machine, like the rest of that path.
+
+The hosts file counts as evidence only when the resolver reads it FIRST: glibc
+takes its order from `/etc/nsswitch.conf`, and a `hosts:` line putting `dns` or
+`mdns` ahead of `files` means curl can get a routable address without
+`/etc/hosts` being consulted at all. No `nsswitch.conf` (macOS, the BSDs) means
+the system resolves it first by its own default.
+
+82 tests.
+
+**Not changed:** the plugin download still defaults to `releases/latest` rather
+than a pinned tag. Pinning by default would strand users on whatever version the
+kit shipped with, including its security fixes, and the source is our own
+repository — `EMCP_PIN_VERSION` pins it for anyone who wants that trade.
+
 ## 1.5.0 — 2026-09-13
 
 Security hardening of `setup-elementor-mcp.sh`, from the ClawHub audit of 1.4.0.

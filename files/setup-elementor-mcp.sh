@@ -87,6 +87,149 @@ valid_host(){
   esac
 }
 
+# arg1: host -> "yes" when /etc/hosts maps it to a loopback address.
+#
+# This is the evidence a Local-by-Flywheel site actually leaves behind: Local
+# writes its sites into /etc/hosts at 127.0.0.1. It is stronger evidence than a
+# DNS lookup, because the system resolver consults this file FIRST - so the
+# entry decides where curl connects - and editing it needs root, at which point
+# the machine is already lost. A name with NO such entry is left to DNS/mDNS,
+# where any responder on the LAN can answer, which is the case this rules out.
+#
+# The residual limit is honest and narrow: the file can be edited after setup,
+# by root.
+# arg1 (optional, tests only): the nsswitch.conf to read.
+#
+# The hosts file is only evidence if the resolver READS it first. glibc takes
+# its order from /etc/nsswitch.conf, and a "hosts:" line that puts dns, mdns or
+# another network source before "files" means curl can get a routable address
+# without /etc/hosts ever being consulted - while a direct scan of that file
+# still says loopback. No nsswitch.conf (macOS, the BSDs) means the system
+# resolves the hosts file first by its own default, which is the case this
+# check is written around.
+hosts_file_is_authoritative(){
+  _ns="${1:-/etc/nsswitch.conf}"
+  [ -r "$_ns" ] || { printf 'yes'; return; }
+  awk '
+    # The action NSS actually takes on a successful files lookup. Default is
+    # return; each [!]STATUS=ACTION pair that covers success overrides it, and a
+    # negated pair covers success whenever its status is not success. Anything
+    # unparseable is "unknown", which the caller treats as unsafe.
+    function success_action(clause,   body, n, parts, i, tok, kv, neg, eff) {
+      eff = "return"
+      body = clause
+      sub(/^[^[]*\[/, "", body)
+      sub(/\].*$/, "", body)
+      n = split(body, parts, /[ \t]+/)
+      for (i = 1; i <= n; i++) {
+        tok = parts[i]
+        if (tok == "") continue
+        neg = 0
+        if (substr(tok, 1, 1) == "!") { neg = 1; tok = substr(tok, 2) }
+        if (split(tok, kv, "=") != 2) return "unknown"
+        if ((!neg && kv[1] == "success") || (neg && kv[1] != "success")) eff = kv[2]
+      }
+      return eff
+    }
+    /^[[:space:]]*hosts:/ {
+      line = tolower($0)
+      sub(/^[[:space:]]*hosts:/, "", line)
+      sub(/#.*/, "", line)
+
+      # Which source answers FIRST. Action clauses are not sources, so drop
+      # them before looking - and they can contain spaces, which is why this
+      # cannot be a token walk that treats "[success=continue" as a word.
+      stripped = line
+      gsub(/\[[^]]*\]/, " ", stripped)
+      n = split(stripped, tok, /[ \t]+/)
+      first = ""
+      for (i = 1; i <= n; i++) if (tok[i] != "") { first = tok[i]; break }
+
+      # Anything but files answering first is a source that can reach the
+      # network before /etc/hosts is consulted - wins, mdns, dns, resolve, or
+      # something this script has never heard of. Fail closed on ALL of them
+      # rather than keeping a list of the ones known to be dangerous.
+      if (first != "files") { print "no"; found = 1; exit }
+
+      # files can answer and STILL not decide it. The clause attached to it can
+      # override the default SUCCESS=return, so glibc carries on to the next
+      # source and can come back with a routable address. Work out the
+      # EFFECTIVE action for SUCCESS rather than looking for the spellings of
+      # it that happen to be known here - "[!UNAVAIL=continue]" says nothing
+      # about success and changes it anyway, because ! negates the status test.
+      if (match(line, /files[ \t]*\[[^]]*\]/)) {
+        if (success_action(substr(line, RSTART, RLENGTH)) != "return") {
+          print "no"; found = 1; exit
+        }
+      }
+      print "yes"; found = 1; exit
+    }
+    # No hosts: line at all -> glibc falls back to "files dns".
+    END { if (!found) print "yes" }
+  ' "$_ns"
+}
+
+# arg2 is the hosts file, for the tests; nothing in this script passes it.
+hosts_maps_to_loopback(){
+  _hh=$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')
+  # On Git Bash, Local updates the WINDOWS resolver file; /etc/hosts there is a
+  # MSYS overlay that is not guaranteed to be it, so reading it would report a
+  # legitimate Local domain as unmapped and abort. (Windows path: implemented,
+  # not verified on a real machine - see the Windows note in CHANGELOG.)
+  if [ -z "${2:-}" ] && [ "$(is_windows_bash)" = "yes" ]; then
+    _hf=$(cygpath "${WINDIR:-C:\\Windows}/System32/drivers/etc/hosts" 2>/dev/null \
+          || printf '%s' "/c/Windows/System32/drivers/etc/hosts")
+  else
+    _hf="${2:-/etc/hosts}"
+  fi
+  [ -n "$_hh" ] || { printf 'no'; return; }
+  [ -r "$_hf" ] || { printf 'no'; return; }
+  # Only for the real file: a caller-supplied one is the test seam, and the
+  # resolver order says nothing about it.
+  if [ -z "${2:-}" ] && [ "$(hosts_file_is_authoritative)" != "yes" ]; then
+    printf 'no'; return
+  fi
+  # EVERY mapping for the name must be loopback, not merely one of them. The
+  # resolver hands curl all of a name's addresses, and curl tries the next one
+  # when a connection fails - so a name with both 127.0.0.1 and a LAN address
+  # reaches the LAN address the moment the local site is stopped, with the proxy
+  # bypassed and the plaintext refusal waived. Stopping at the first loopback
+  # match answered "yes" for exactly that host.
+  # A "127." PREFIX is not an address. "127.invalid" and "127.0.0.256" are not
+  # loopback and not valid, so the resolver ignores those lines and may fall
+  # through to DNS/mDNS - while a prefix match would have called the host local,
+  # bypassed the proxy and waived the plaintext refusal. Same mistake the
+  # is_local_host glob made; it needs a real dotted quad here too.
+  awk -v want="$_hh" '
+    # CANONICAL decimal octets - no leading zeros. "127.00.0.1" and
+    # "127.008.0.1" pass a loose numeric test, but resolvers disagree about
+    # them: a strict parser rejects the line outright and falls through to DNS,
+    # and one reading them as octal means something else again. An address two
+    # parsers read differently is not evidence that the traffic stays on this
+    # machine, so it does not count as loopback here.
+    function is_loopback(a,   p, i) {
+      if (a == "::1") return 1
+      if (a !~ /^127\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$/) return 0
+      split(a, p, ".")
+      for (i = 2; i <= 4; i++) if (p[i] + 0 > 255) return 0
+      return 1
+    }
+    # The Windows resolver file is CRLF, so the last field on a line arrives as
+    # "site.local\r" and never matches - which would report a legitimate Local
+    # mapping as absent and abort the run.
+    { sub(/\r$/, "") }
+    { sub(/#.*/, "") }
+    NF < 2 { next }
+    {
+      for (i = 2; i <= NF; i++) if (tolower($i) == want) {
+        seen = 1
+        if (!is_loopback($1)) bad = 1
+      }
+    }
+    END { exit(seen && !bad ? 0 : 1) }
+  ' "$_hf" && printf 'yes' || printf 'no'
+}
+
 # arg1: host -> "yes" when the traffic provably cannot leave this machine,
 # for as long as the config written here keeps being used.
 #
@@ -425,6 +568,26 @@ PY
     SITE_URL="http://${SITE_NAME}.local"
   fi
   [ -f "$SITE_PATH/wp-config.php" ] || abort "No wp-config.php at $SITE_PATH (is the site name correct? check Local)"
+  # wp-config.php proves the site's FILES are here. It does not prove its HTTP
+  # endpoint is: the domain comes from Local's own metadata, and a name with no
+  # /etc/hosts entry is resolved by DNS/mDNS, where any responder on the LAN can
+  # answer - and this run sends a reusable application password on every
+  # request, in plaintext. Choosing "Local" is an assertion; this checks it.
+  _local_host=$(url_host "$SITE_URL")
+  if [ "$(is_local_host "$_local_host")" != "yes" ] \
+     && [ "$(hosts_maps_to_loopback "$_local_host")" != "yes" ]; then
+    case "$(http_verdict "$SITE_URL")" in
+      named)
+        warn "Local site '$_local_host' has no loopback entry in /etc/hosts — its traffic may leave this machine, and WP_ALLOW_HTTP names it, so continuing over plaintext http."
+        ;;
+      *)
+        abort "Refusing http:// for $_local_host — Local reports this domain, but nothing on this machine maps it to loopback,
+  so the application password could travel unencrypted to whatever answers for it on the network.
+  Start the site in Local (it writes the /etc/hosts entry), or name the host explicitly:
+      WP_ALLOW_HTTP='$_local_host' bash \"$SELF\""
+        ;;
+    esac
+  fi
   ok "Site path:  $SITE_PATH"
   ok "Site URL:   $SITE_URL"
 else
@@ -457,12 +620,18 @@ fi
 # SITE_URL. Setting the flag in the live-host branch alone left every
 # Local-by-Flywheel run - the common case - talking to its site through a
 # configured proxy.
-# Local mode is itself the evidence: choosing it establishes that the site is
-# hosted on this machine, whatever domain it carries. A Local site with a custom
-# domain (project.dev, say, from sites.json) is not in is_local_host's suffix
-# list, so testing the URL alone left it talking through a configured proxy.
+# The proxy bypass follows the same EVIDENCE the plaintext decision does, not
+# the mode the user picked. Choosing "Local" used to be enough on its own, but a
+# domain out of Local's metadata is an assertion, not proof - and bypassing the
+# proxy for a host that turns out to be on the LAN sends the credential there
+# directly. A loopback literal, an RFC 6761 localhost name, or an /etc/hosts
+# entry pointing at loopback: any of those, in either mode.
 SITE_IS_LOCAL=no
-{ [ "$MODE" = "local" ] || [ "$(http_verdict "$SITE_URL")" = "local" ]; } && SITE_IS_LOCAL=yes
+_site_host=$(url_host "$SITE_URL")
+if [ "$(is_local_host "$_site_host")" = "yes" ] \
+   || [ "$(hosts_maps_to_loopback "$_site_host")" = "yes" ]; then
+  SITE_IS_LOCAL=yes
+fi
 
 step "3/8  Connectivity"
 HTTP_CODE=$(site_curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$SITE_URL/wp-json/" || echo "000")
@@ -978,9 +1147,16 @@ print((a[0].get("digest") or "").replace("sha256:","") if a else "")
   Nothing was installed. Re-run; if it persists, the download is being tampered with or the release was replaced."
     fi
     ok "Download verified (sha256 ${EM_ACTUAL:0:12}…)${EMCP_EXPECTED_SHA256:+ against EMCP_EXPECTED_SHA256}"
+  elif [ "${EMCP_ALLOW_UNVERIFIED:-0}" = "1" ]; then
+    warn "This release publishes no sha256 for its asset, and EMCP_ALLOW_UNVERIFIED=1 is set — installing an UNVERIFIED download."
   else
-    warn "This release publishes no sha256 for its asset — installing an UNVERIFIED download."
-    info "  Pin it instead: EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> bash \"$SELF\""
+    abort "This release publishes no sha256 for its asset, so the download cannot be verified.
+  The archive is about to be installed and ACTIVATED as PHP on your WordPress site, so it is not installed.
+  Supply a digest obtained out of band — which is the stronger check anyway, since a release's own
+  digest travels in the same response as its URL:
+      EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> bash \"$SELF\"
+  Or, to accept an unverified download deliberately:
+      EMCP_ALLOW_UNVERIFIED=1 bash \"$SELF\""
   fi
 
   # Repack with clean folder name (zipballs have ugly hash-suffixed dirs)
@@ -1113,7 +1289,7 @@ EOF
     else
       warn "Still not seeing the MCP namespace."
       info "Things to try, in order:"
-      info "  1. WP Admin → Plugins: deactivate then reactivate both MCP plugins"
+      info "  1. WP Admin → Plugins: deactivate then reactivate Elementor MCP"
       info "  2. Check WP Admin → Plugins for any error notices at the top"
       info "  3. WP Admin → Settings → Permalinks → Save (flushes rewrites)"
       info "  4. Restart your Local site (stop + start)"

@@ -316,18 +316,21 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   # it must run before http_verdict's refusal, whose hint names WP_ALLOW_HTTP -
   # advice that cannot work for a URL with no host to name
   host_line=$(grep -n 'Could not read a hostname from' "$SCRIPT" | head -1 | cut -d: -f1)
-  verdict_line=$(grep -n 'case "$(http_verdict "$SITE_URL")" in' "$SCRIPT" | head -1 | cut -d: -f1)
+  # the LIVE-HOST verdict, not the Local-mode one that now precedes it
+  verdict_line=$(grep -n 'case "$(http_verdict "$SITE_URL")" in' "$SCRIPT" | tail -1 | cut -d: -f1)
   [ "$host_line" -lt "$verdict_line" ]
 }
 
-@test "Local mode bypasses the proxy whatever domain the site carries" {
-  # A Local site with a custom domain (project.dev from sites.json) is not in
-  # is_local_host's suffix list, so testing the URL alone left the common mode
-  # talking to its site through a configured proxy.
+@test "the proxy bypass is decided for both modes at one place" {
+  # It used to be set in the live-host branch alone, which left every
+  # Local-by-Flywheel run talking to its site through a configured proxy; then
+  # it keyed on MODE=local, which trusted a domain out of Local's metadata
+  # rather than checking it. It is now one evidence test, reached by both modes.
   fn http_verdict "http://project.dev"
   [ "$output" = "refused" ]
-  run bash -c "sed -n '/^SITE_IS_LOCAL=no/,+1p' '$SCRIPT'"
-  [[ "$output" == *'"$MODE" = "local"'* ]]
+  set_line=$(grep -n '^SITE_IS_LOCAL=no' "$SCRIPT" | cut -d: -f1)
+  probe_line=$(grep -n '3/8  Connectivity' "$SCRIPT" | cut -d: -f1)
+  [ "$set_line" -lt "$probe_line" ]
 }
 
 # ---- inherited ACLs and retry hints (Codex, PR #32 round 8) ------------------
@@ -457,4 +460,163 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
     fn is_local_host "$h"
     [ "$output" = "yes" ] || { echo "failed for $h: $output"; return 1; }
   done
+}
+
+# ---- ClawHub audit of 1.5.0 --------------------------------------------------
+@test "a Local domain is trusted only with a loopback entry in /etc/hosts" {
+  # Local writes its sites into /etc/hosts at 127.0.0.1; a name with no such
+  # entry is left to DNS/mDNS, where any responder on the LAN can answer.
+  h=$(awk '$1=="127.0.0.1" && $2 ~ /\.local$/ {print $2; exit}' /etc/hosts)
+  if [ -n "$h" ]; then
+    fn hosts_maps_to_loopback "$h"
+    [ "$output" = "yes" ]
+  fi
+  for miss in no-such-host-4b1c9a.local example.com ""; do
+    fn hosts_maps_to_loopback "$miss"
+    [ "$output" = "no" ] || { echo "failed for ${miss:-<empty>}: $output"; return 1; }
+  done
+}
+
+@test "EVERY mapping for the name must be loopback" {
+  # The resolver hands curl all of a name's addresses and curl tries the next
+  # one when a connection fails, so a name with both 127.0.0.1 and a LAN address
+  # reaches the LAN the moment the local site is stopped - with the proxy
+  # bypassed and the plaintext refusal waived. Stopping at the first loopback
+  # match answered "yes" for exactly that host.
+  hf="$BATS_TEST_TMPDIR/hosts"
+  cat > "$hf" <<'HOSTS'
+127.0.0.1 both.local
+192.168.1.50 both.local
+127.0.0.1 pure.local
+::1 pure.local
+10.0.0.5 lan.local
+127.0.0.1 commented.local # trailing comment
+# 127.0.0.1 disabled.local
+127.0.0.256 bad256.local
+127.invalid badname.local
+127.0.0 short.local
+127.1.2.3 highoctet.local
+127.00.0.1 lead0.local
+127.008.0.1 lead8.local
+HOSTS
+  for case in "both.local:no" "pure.local:yes" "lan.local:no" \
+              "commented.local:yes" "disabled.local:no" "absent.local:no" \
+              "bad256.local:no" "badname.local:no" "short.local:no" \
+              "highoctet.local:yes" "lead0.local:no" "lead8.local:no"; do
+    fn hosts_maps_to_loopback "${case%%:*}" "$hf"
+    [ "$output" = "${case##*:}" ] || { echo "failed for $case: got $output"; return 1; }
+  done
+}
+
+@test "a 127. PREFIX is not a loopback address" {
+  # the third time this exact mistake appeared in this file: a name like
+  # 127.invalid or 127.0.0.256 is not an address at all, so the resolver
+  # ignores that line and may fall through to DNS - while a prefix match called
+  # the host local, bypassed the proxy and waived the plaintext refusal
+  run bash -c "sed -n '/^hosts_maps_to_loopback()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"function is_loopback"* ]]
+  [[ "$output" != *'$1 !~ /^127\./'* ]]
+}
+
+@test "Git Bash reads the Windows resolver file" {
+  # Local updates %WINDIR%\System32\drivers\etc\hosts there; MSYS's /etc/hosts
+  # is not guaranteed to be it, so reading it would report a legitimate Local
+  # domain as unmapped and abort. (Windows: implemented, not verified.)
+  run bash -c "sed -n '/^hosts_maps_to_loopback()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"is_windows_bash"* ]]
+  [[ "$output" == *"cygpath"* ]]
+  [[ "$output" == *"System32/drivers/etc/hosts"* ]]
+}
+
+@test "a CRLF hosts file still matches its last field" {
+  # The Windows resolver file is CRLF, so the last field arrives as
+  # "site.local\r" and never matched - reporting a legitimate Local mapping as
+  # absent and aborting the run, which pushes the user toward WP_ALLOW_HTTP.
+  hf="$BATS_TEST_TMPDIR/win-hosts"
+  printf '127.0.0.1 crlf.local\r\n127.0.0.1 crlf2.local other.local\r\n' > "$hf"
+  for h in crlf.local crlf2.local other.local; do
+    fn hosts_maps_to_loopback "$h" "$hf"
+    [ "$output" = "yes" ] || { echo "failed for $h: $output"; return 1; }
+  done
+}
+
+@test "the hosts-file argument is a test seam only" {
+  # nothing in the script itself passes a second argument
+  run bash -c "grep -cE 'hosts_maps_to_loopback \"[^\"]*\" +\"' '$SCRIPT'"
+  [ "$output" = "0" ]
+}
+
+@test "Local mode checks its domain before sending a credential to it" {
+  # wp-config.php proves the FILES are here, not that the HTTP endpoint is
+  cfg=$(grep -n 'No wp-config.php at' "$SCRIPT" | head -1 | cut -d: -f1)
+  chk=$(grep -n 'hosts_maps_to_loopback "\$_local_host"' "$SCRIPT" | head -1 | cut -d: -f1)
+  url=$(grep -n 'ok "Site URL:   \$SITE_URL"' "$SCRIPT" | head -1 | cut -d: -f1)
+  [ -n "$chk" ] && [ "$cfg" -lt "$chk" ] && [ "$chk" -lt "$url" ]
+}
+
+@test "the proxy bypass follows evidence, not the chosen mode" {
+  run bash -c "grep -n 'SITE_IS_LOCAL=yes' '$SCRIPT'"
+  [[ "$output" != *'"$MODE" = "local"'* ]]
+  run bash -c "sed -n '/^SITE_IS_LOCAL=no/,/^fi/p' '$SCRIPT'"
+  [[ "$output" == *"is_local_host"* ]]
+  [[ "$output" == *"hosts_maps_to_loopback"* ]]
+}
+
+@test "an unverifiable download is refused unless opted into" {
+  run bash -c "sed -n '/publishes no sha256/,/^  fi/p' '$SCRIPT'"
+  [[ "$output" == *"abort"* ]]
+  [[ "$output" == *"EMCP_ALLOW_UNVERIFIED"* ]]
+}
+
+@test "the recovery hint does not name a plugin the script removes" {
+  run bash -c "grep -c 'reactivate both MCP plugins' '$SCRIPT'"
+  [ "$output" = "0" ]
+}
+
+@test "the hosts file counts only when the resolver reads it first" {
+  # glibc takes its order from /etc/nsswitch.conf: a "hosts:" line putting dns
+  # or mdns before "files" means curl can get a routable address without
+  # /etc/hosts being consulted at all, while a direct scan still says loopback.
+  ns="$BATS_TEST_TMPDIR/ns"
+  mkdir -p "$ns"
+  printf 'hosts: files dns\n'                                   > "$ns/good"
+  printf 'hosts: dns files\n'                                   > "$ns/dnsfirst"
+  printf 'hosts: mdns4_minimal [NOTFOUND=return] files dns\n'    > "$ns/mdnsfirst"
+  printf 'hosts: files mdns4 dns\n'                             > "$ns/filesfirst"
+  printf 'passwd: files\n'                                      > "$ns/nohostsline"
+  # an UNKNOWN source before files is not harmless: Samba's wins resolves over
+  # the network, and so may the next name nobody here has heard of
+  printf 'hosts: wins files dns\n'                              > "$ns/winsfirst"
+  printf 'hosts: myhostname files\n'                            > "$ns/myhostfirst"
+  # files can answer and still not decide it
+  printf 'hosts: files [SUCCESS=continue] dns\n'                > "$ns/successcontinue"
+  printf 'hosts: files [SUCCESS=merge] dns\n'                   > "$ns/successmerge"
+  printf 'hosts: files [SUCCESS=continue NOTFOUND=return] dns\n' > "$ns/multikey"
+  printf 'hosts: files [NOTFOUND=return] dns\n'                 > "$ns/notfound"
+  # ! negates the STATUS test, so a clause that never mentions success can
+  # still change what success does
+  printf 'hosts: files [!UNAVAIL=continue] dns\n'               > "$ns/negunavail"
+  printf 'hosts: files [!SUCCESS=continue] dns\n'               > "$ns/negsuccess"
+  printf 'hosts: files [SUCCESS=return NOTFOUND=continue] dns\n' > "$ns/succreturn"
+  printf 'hosts: files [TRYAGAIN=continue] dns\n'               > "$ns/tryagain"
+  printf 'hosts: files [garbage] dns\n'                         > "$ns/garbage"
+  printf '#hosts: dns\nhosts: files\n'                          > "$ns/commented"
+  for case in "good:yes" "dnsfirst:no" "mdnsfirst:no" "filesfirst:yes" "nohostsline:yes" \
+              "winsfirst:no" "myhostfirst:no" "successcontinue:no" "successmerge:no" \
+              "multikey:no" "notfound:yes" "commented:yes" \
+              "negunavail:no" "negsuccess:yes" "succreturn:yes" "tryagain:yes" \
+              "garbage:no"; do
+    fn hosts_file_is_authoritative "$ns/${case%%:*}"
+    [ "$output" = "${case##*:}" ] || { echo "failed for $case: got $output"; return 1; }
+  done
+  # absent file: macOS and the BSDs have none and resolve the hosts file first
+  fn hosts_file_is_authoritative "$ns/definitely-absent"
+  [ "$output" = "yes" ]
+}
+
+@test "the resolver-order check gates the real hosts file only" {
+  # a caller-supplied hosts file is the test seam; nsswitch says nothing about it
+  run bash -c "sed -n '/^hosts_maps_to_loopback()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"hosts_file_is_authoritative"* ]]
+  [[ "$output" == *'-z "${2:-}"'* ]]
 }
