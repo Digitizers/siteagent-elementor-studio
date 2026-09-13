@@ -111,6 +111,26 @@ hosts_file_is_authoritative(){
   _ns="${1:-/etc/nsswitch.conf}"
   [ -r "$_ns" ] || { printf 'yes'; return; }
   awk '
+    # The action NSS actually takes on a successful files lookup. Default is
+    # return; each [!]STATUS=ACTION pair that covers success overrides it, and a
+    # negated pair covers success whenever its status is not success. Anything
+    # unparseable is "unknown", which the caller treats as unsafe.
+    function success_action(clause,   body, n, parts, i, tok, kv, neg, eff) {
+      eff = "return"
+      body = clause
+      sub(/^[^[]*\[/, "", body)
+      sub(/\].*$/, "", body)
+      n = split(body, parts, /[ \t]+/)
+      for (i = 1; i <= n; i++) {
+        tok = parts[i]
+        if (tok == "") continue
+        neg = 0
+        if (substr(tok, 1, 1) == "!") { neg = 1; tok = substr(tok, 2) }
+        if (split(tok, kv, "=") != 2) return "unknown"
+        if ((!neg && kv[1] == "success") || (neg && kv[1] != "success")) eff = kv[2]
+      }
+      return eff
+    }
     /^[[:space:]]*hosts:/ {
       line = tolower($0)
       sub(/^[[:space:]]*hosts:/, "", line)
@@ -131,12 +151,16 @@ hosts_file_is_authoritative(){
       # rather than keeping a list of the ones known to be dangerous.
       if (first != "files") { print "no"; found = 1; exit }
 
-      # files can answer and STILL not decide it: [SUCCESS=continue] (or
-      # =merge) overrides the default SUCCESS=return, so glibc carries on to
-      # the next source and can come back with a routable address.
+      # files can answer and STILL not decide it. The clause attached to it can
+      # override the default SUCCESS=return, so glibc carries on to the next
+      # source and can come back with a routable address. Work out the
+      # EFFECTIVE action for SUCCESS rather than looking for the spellings of
+      # it that happen to be known here - "[!UNAVAIL=continue]" says nothing
+      # about success and changes it anyway, because ! negates the status test.
       if (match(line, /files[ \t]*\[[^]]*\]/)) {
-        clause = substr(line, RSTART, RLENGTH)
-        if (clause ~ /success[ \t]*=[ \t]*(continue|merge)/) { print "no"; found = 1; exit }
+        if (success_action(substr(line, RSTART, RLENGTH)) != "return") {
+          print "no"; found = 1; exit
+        }
       }
       print "yes"; found = 1; exit
     }

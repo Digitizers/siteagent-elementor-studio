@@ -593,10 +593,19 @@ HOSTS
   printf 'hosts: files [SUCCESS=merge] dns\n'                   > "$ns/successmerge"
   printf 'hosts: files [SUCCESS=continue NOTFOUND=return] dns\n' > "$ns/multikey"
   printf 'hosts: files [NOTFOUND=return] dns\n'                 > "$ns/notfound"
+  # ! negates the STATUS test, so a clause that never mentions success can
+  # still change what success does
+  printf 'hosts: files [!UNAVAIL=continue] dns\n'               > "$ns/negunavail"
+  printf 'hosts: files [!SUCCESS=continue] dns\n'               > "$ns/negsuccess"
+  printf 'hosts: files [SUCCESS=return NOTFOUND=continue] dns\n' > "$ns/succreturn"
+  printf 'hosts: files [TRYAGAIN=continue] dns\n'               > "$ns/tryagain"
+  printf 'hosts: files [garbage] dns\n'                         > "$ns/garbage"
   printf '#hosts: dns\nhosts: files\n'                          > "$ns/commented"
   for case in "good:yes" "dnsfirst:no" "mdnsfirst:no" "filesfirst:yes" "nohostsline:yes" \
               "winsfirst:no" "myhostfirst:no" "successcontinue:no" "successmerge:no" \
-              "multikey:no" "notfound:yes" "commented:yes"; do
+              "multikey:no" "notfound:yes" "commented:yes" \
+              "negunavail:no" "negsuccess:yes" "succreturn:yes" "tryagain:yes" \
+              "garbage:no"; do
     fn hosts_file_is_authoritative "$ns/${case%%:*}"
     [ "$output" = "${case##*:}" ] || { echo "failed for $case: got $output"; return 1; }
   done
