@@ -303,11 +303,11 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
 }
 
 @test "the live-host branch rejects a URL with no readable host" {
-  run bash -c "grep -n 'Could not read a host from' '$SCRIPT'"
+  run bash -c "grep -n 'Could not read a hostname from' '$SCRIPT'"
   [ "$status" -eq 0 ]
   # it must run before http_verdict's refusal, whose hint names WP_ALLOW_HTTP -
   # advice that cannot work for a URL with no host to name
-  host_line=$(grep -n 'Could not read a host from' "$SCRIPT" | head -1 | cut -d: -f1)
+  host_line=$(grep -n 'Could not read a hostname from' "$SCRIPT" | head -1 | cut -d: -f1)
   verdict_line=$(grep -n 'case "$(http_verdict "$SITE_URL")" in' "$SCRIPT" | head -1 | cut -d: -f1)
   [ "$host_line" -lt "$verdict_line" ]
 }
@@ -403,4 +403,38 @@ fn() { run bash "$SCRIPT" --self-test-fn "$@" </dev/null; }
   [ "$output" = "no" ]
   fn is_local_host ""
   [ "$output" = "no" ]
+}
+
+# ---- host shape (Codex, PR #32 round 10) ------------------------------------
+@test "a host with shell metacharacters is refused, not reflected" {
+  # The refusal reflects the host into a command the user is invited to copy,
+  # so "http://foo;printf PWNED" offered `WP_ALLOW_HTTP=foo;printf pwned bash ...`
+  fn valid_host "foo;printf pwned"
+  [ "$output" = "no" ]
+  fn valid_host 'foo$(id)'
+  [ "$output" = "no" ]
+  fn http_verdict "http://foo;printf PWNED"
+  [ "$output" = "refused" ]
+}
+
+@test "ordinary hosts and IP literals pass the shape test" {
+  for h in example.com 127.0.0.1 x_y.local 2001:db8::1 sub.domain.co.uk; do
+    fn valid_host "$h"
+    [ "$output" = "yes" ] || { echo "failed for $h: $output"; return 1; }
+  done
+}
+
+@test "the copyable hint quotes the host" {
+  run bash -c "grep -c \"WP_ALLOW_HTTP='\" '$SCRIPT'"
+  [ "$output" -ge 1 ]
+}
+
+@test "an IP literal is decided without any timeout machinery" {
+  # native Windows Python has no signal.SIGALRM, and installing it before the
+  # literal check made the whole test fail closed - refusing 127.0.0.1 itself
+  run bash -c "sed -n '/^is_local_host()/,/^}/p' '$SCRIPT'"
+  [[ "$output" == *"hasattr(signal, 'SIGALRM')"* ]]
+  lit=$(printf '%s\n' "$output" | grep -n 'ipaddress.ip_address(host)' | head -1 | cut -d: -f1)
+  alarm=$(printf '%s\n' "$output" | grep -n 'signal.alarm' | head -1 | cut -d: -f1)
+  [ "$lit" -lt "$alarm" ]
 }

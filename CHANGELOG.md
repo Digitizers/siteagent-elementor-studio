@@ -21,9 +21,19 @@ AIG rated three of these High.
   is installed with an explicit warning rather than silently.
 - **Plaintext `http://` to a non-local host is refused.** A live run sends a
   reusable application password on every request. `WP_ALLOW_HTTP=host` (comma
-  separated) permits named hosts; localhost and `.local` / `.test` /
-  `.localhost` are exempt as before. Same rule, same reasoning, as
+  separated) permits named hosts. Same rule, same reasoning, as
   wordpress-api-pro 3.9.5.
+- **"Local" means a loopback ADDRESS, not a suffix.** `.local` is mDNS:
+  `wordpress.local` commonly resolves to another machine on the LAN, so
+  exempting the suffix sent the application password across a real network in
+  the clear - and past any proxy - while reporting the host as local. An IP
+  literal is now read directly, a name is resolved, and every address it
+  resolves to must be loopback; `localhost` and `*.localhost` are loopback by
+  RFC 6761 and need no lookup. **This is a behaviour change for live-host
+  mode:** a `.local` or `.test` URL that does not resolve to loopback now needs
+  an explicit `WP_ALLOW_HTTP` entry. Local-by-Flywheel is unaffected — it writes
+  its sites into `/etc/hosts` at 127.0.0.1, and choosing Local mode sets the
+  proxy-bypass flag on its own regardless of the domain the site carries.
 - **`.mcp.json` is created mode 600 before the credential is written to it.**
   Writing first and fixing permissions afterwards leaves a window where the file
   is world-readable on a shared machine.

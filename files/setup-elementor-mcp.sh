@@ -70,6 +70,23 @@ url_host(){
   esac
 }
 
+# arg1: host -> "yes" when it is SHAPED like a hostname or an IP literal.
+#
+# url_host has already taken the authority and lowercased it, but it does not
+# judge the characters, and a refusal reflects the host into a command the user
+# is invited to copy. "http://foo;printf PWNED" parsed to the host
+# "foo;printf pwned", which the hint then offered as
+# `WP_ALLOW_HTTP=foo;printf pwned bash "..."` - copy it and the injected
+# command runs. Letters, digits, dots, hyphens, underscores and colons (IPv6,
+# brackets already stripped) are the whole vocabulary.
+valid_host(){
+  case "${1:-}" in
+    "") printf 'no' ;;
+    *[!a-z0-9.:_-]*) printf 'no' ;;
+    *) printf 'yes' ;;
+  esac
+}
+
 # arg1: host -> "yes" when the traffic provably cannot leave this machine.
 #
 # A SUFFIX is not that proof. ".local" is mDNS: "wordpress.local" commonly
@@ -101,15 +118,22 @@ def bail(*_):
     print('no')
     sys.exit(0)
 
-signal.signal(signal.SIGALRM, bail)
-signal.alarm(3)
 host = sys.argv[1]
+# An IP literal is decided without a lookup, so it is answered BEFORE any
+# timeout machinery - and needs none.
 try:
-    print('yes' if ipaddress.ip_address(host).is_loopback
-                 or ipaddress.ip_address(host).is_unspecified else 'no')
-    sys.exit(0)
+    literal = ipaddress.ip_address(host)
 except ValueError:
-    pass
+    literal = None
+if literal is not None:
+    print('yes' if literal.is_loopback or literal.is_unspecified else 'no')
+    sys.exit(0)
+# SIGALRM does not exist on native Windows Python; there the lookup runs
+# without a deadline rather than the whole check failing closed on an
+# AttributeError - which would have refused 127.0.0.1 itself.
+if hasattr(signal, 'SIGALRM'):
+    signal.signal(signal.SIGALRM, bail)
+    signal.alarm(3)
 try:
     addresses = {info[4][0].split('%')[0] for info in socket.getaddrinfo(host, None)}
 except OSError:
@@ -146,11 +170,12 @@ http_verdict(){
   url="${1:-}"
   case "$url" in http://*) ;; *) printf 'ok'; return ;; esac
   host=$(url_host "$url")
-  # Fail closed on an unreadable authority. "http:///remote.example" parses to
-  # an EMPTY host here, and an empty host is a substring of the allowlist's own
-  # separators (",," contains ",,"), so it matched as explicitly named - while
-  # curl normalises that URL to remote.example and sends the credential there.
-  [ -n "$host" ] || { printf 'refused'; return; }
+  # Fail closed on an authority that is unreadable or not shaped like a host.
+  # "http:///remote.example" parses to an EMPTY host, and an empty host is a
+  # substring of the allowlist's own separators (",," contains ",,"), so it
+  # matched as explicitly named - while curl normalises that URL to
+  # remote.example and sends the credential there.
+  [ "$(valid_host "$host")" = "yes" ] || { printf 'refused'; return; }
   [ "$(is_local_host "$host")" = "yes" ] && { printf 'local'; return; }
   allowed=",$(printf '%s' "${WP_ALLOW_HTTP:-}" | tr -d ' ' | tr '[:upper:]' '[:lower:]'),"
   case "$allowed" in *",$host,"*) printf 'named' ;; *) printf 'refused' ;; esac
@@ -426,7 +451,7 @@ else
   # A scheme alone is not a URL: "http:///example.com" passes the regex above and
   # leaves no readable host. Say so here rather than letting http_verdict's
   # refusal suggest a WP_ALLOW_HTTP entry that could never match.
-  [ -n "$(url_host "$SITE_URL")" ] || abort "Could not read a host from $SITE_URL — check for a typo (an extra slash after the scheme, perhaps)."
+  [ "$(valid_host "$(url_host "$SITE_URL")")" = "yes" ] || abort "Could not read a hostname from $SITE_URL — check for a typo (an extra slash after the scheme, perhaps)."
   # A live-host run sends a reusable application password on every request, so
   # plaintext http is refused unless the host is a local dev host or the caller
   # names it explicitly - same rule, and the same reasoning, as
@@ -434,7 +459,7 @@ else
   case "$(http_verdict "$SITE_URL")" in
     refused)
       abort "Refusing http:// for $(url_host "$SITE_URL") — the application password would travel unencrypted.
-  Use https://, or name this host explicitly: WP_ALLOW_HTTP=$(url_host "$SITE_URL") bash \"$SELF\""
+  Use https://, or name this host explicitly: WP_ALLOW_HTTP='$(url_host "$SITE_URL")' bash \"$SELF\""
       ;;
     named)
       warn "Sending credentials over plaintext http to $(url_host "$SITE_URL") (WP_ALLOW_HTTP names it)."
