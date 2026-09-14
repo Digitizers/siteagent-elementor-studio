@@ -1441,8 +1441,10 @@ cat <<EOF
   credentials anywhere. Finish with:
     export WP_URL="$SITE_URL"
     export WP_USERNAME="$WP_USER"
-    export WP_APP_PASSWORD="<the application password you entered>"
-  Then restart Claude Code in this directory — or run this wizard again from a
+    printf 'application password: ' && read -rs WP_APP_PASSWORD && echo && export WP_APP_PASSWORD
+  (the third line prompts for the application password and reads it without
+  echo — do not type the password into an export line, that lands in your
+  shell history). Then restart Claude Code in this directory — or run this wizard again from a
   separate per-site project directory to write a local .mcp.json instead.
 EOF
 exit 0
