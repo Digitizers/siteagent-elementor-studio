@@ -562,10 +562,100 @@ HOSTS
   [[ "$output" == *"hosts_maps_to_loopback"* ]]
 }
 
-@test "an unverifiable download is refused unless opted into" {
+# ---- emcp_release_plan: which release, and which digest it must match --------
+@test "the default install is the kit's pinned release, checked against the recorded digest" {
+  fn emcp_release_plan "" "" ""
+  [ "$status" -eq 0 ]
+  pin=$(grep -m1 '^EMCP_DEFAULT_VERSION=' "$SCRIPT" | cut -d'"' -f2)
+  dig=$(grep -m1 '^EMCP_DEFAULT_SHA256=' "$SCRIPT" | cut -d'"' -f2)
+  [ "${lines[0]}" = "https://api.github.com/repos/Digitizers/elementor-mcp/releases/tags/$pin" ]
+  [ "${lines[1]}" = "$dig" ]
+}
+
+@test "the recorded pin is a release tag and the recorded digest a full sha256" {
+  run bash -c "grep -m1 '^EMCP_DEFAULT_VERSION=' '$SCRIPT' | cut -d'\"' -f2"
+  [[ "$output" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  run bash -c "grep -m1 '^EMCP_DEFAULT_SHA256=' '$SCRIPT' | cut -d'\"' -f2"
+  [[ "$output" =~ ^[0-9a-f]{64}$ ]]
+}
+
+@test "EMCP_PIN_VERSION=latest opts into the newest release, checked against its own published digest" {
+  fn emcp_release_plan latest "" ""
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "https://api.github.com/repos/Digitizers/elementor-mcp/releases/latest" ]
+  [ "$(printf '%s\n' "$output" | sed -n 2p)" = "" ]
+}
+
+@test "a pinned tag with an out-of-band digest is checked against that digest" {
+  fn emcp_release_plan v1.2.3 deadbeef ""
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = "https://api.github.com/repos/Digitizers/elementor-mcp/releases/tags/v1.2.3" ]
+  [ "${lines[1]}" = "deadbeef" ]
+}
+
+@test "an out-of-band digest overrides the recorded one for the default pin" {
+  fn emcp_release_plan "" cafef00d ""
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = "cafef00d" ]
+}
+
+@test "the default pin never downgrades an installed newer plugin" {
+  fn emcp_release_plan "" "" 99.0.0
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  # same or older installed: fine
+  pin=$(grep -m1 '^EMCP_DEFAULT_VERSION=' "$SCRIPT" | cut -d'"' -f2)
+  fn emcp_release_plan "" "" "${pin#v}"
+  [ "$status" -eq 0 ]
+  fn emcp_release_plan "" "" 1.10.0
+  [ "$status" -eq 0 ]
+}
+
+@test "a refused downgrade keeps a newer fork that serves the route, and stops only when none does" {
+  run bash -c "sed -n '/^if \[ \"\$SKIP_MCP_INSTALL\" = \"no\" \]; then/,/^fi/p' '$SCRIPT' | head -20"
+  [[ "$output" == *'emcp_release_plan'* ]]
+  [[ "$output" == *'"$HAS_MCP" = "yes"'* ]]
+  [[ "$output" == *'keeping it'* ]]
+  [[ "$output" == *'SKIP_MCP_INSTALL="yes"'* ]]
+  [[ "$output" == *"abort"* ]]
+  [[ "$output" == *"EMCP_PIN_VERSION=latest"* ]]
+  # the plan is decided before the download block creates its work dir
+  plan=$(grep -n 'EM_PLAN=\$(emcp_release_plan' "$SCRIPT" | head -1 | cut -d: -f1)
+  work=$(grep -n 'WORK=\$(mktemp -d)' "$SCRIPT" | head -1 | cut -d: -f1)
+  [ "$plan" -lt "$work" ]
+}
+
+# ---- ver_lt: semver order, as far as a plugin header needs -------------------
+@test "ver_lt orders numerically, not lexically" {
+  fn ver_lt 1.9.0 1.10.0;   [ "$status" -eq 0 ]
+  fn ver_lt 1.10.0 1.9.0;   [ "$status" -eq 1 ]
+  fn ver_lt 1.34.1 1.34.1;  [ "$status" -eq 1 ]
+}
+
+@test "a prerelease is lower than the release of the same core" {
+  fn ver_lt 1.34.1-rc.1 1.34.1; [ "$status" -eq 0 ]
+  fn ver_lt 1.34.1 1.34.1-rc.1; [ "$status" -eq 1 ]
+  fn ver_lt 1.34.1-rc.1 1.34.1-rc.2; [ "$status" -eq 0 ]
+  fn ver_lt 1.34.0 1.34.1-rc.1; [ "$status" -eq 0 ]
+}
+
+@test "build metadata does not order" {
+  fn ver_lt 1.34.1+build.7 1.34.1; [ "$status" -eq 1 ]
+  fn ver_lt 1.34.1 1.34.1+build.7; [ "$status" -eq 1 ]
+}
+
+@test "replacing an installed prerelease of the pin with the pin is not a downgrade" {
+  pin=$(grep -m1 '^EMCP_DEFAULT_VERSION=' "$SCRIPT" | cut -d'"' -f2)
+  fn emcp_release_plan "" "" "${pin#v}-rc.1"
+  [ "$status" -eq 0 ]
+}
+
+@test "no unverified install path remains" {
+  run bash -c "grep -c 'EMCP_ALLOW_UNVERIFIED' '$SCRIPT'"
+  [ "$output" = "0" ]
   run bash -c "sed -n '/publishes no sha256/,/^  fi/p' '$SCRIPT'"
   [[ "$output" == *"abort"* ]]
-  [[ "$output" == *"EMCP_ALLOW_UNVERIFIED"* ]]
+  [[ "$output" == *"EMCP_EXPECTED_SHA256"* ]]
 }
 
 @test "the recovery hint does not name a plugin the script removes" {

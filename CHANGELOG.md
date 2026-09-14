@@ -5,6 +5,47 @@ All notable changes to the siteagent-elementor-studio skill kit are documented h
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the kit is versioned via the `version:` field in `files/SKILL.md`.
 
+## 1.7.0 — 2026-09-15
+
+From the ClawHub audit of 1.6.1: static analysis is clean (the 1.6.1 fix), the
+plaintext finding is gone, and one Medium remains — the plugin download
+defaulting to `releases/latest`. This release takes it, and corrects the
+reasoning 1.6.0 gave for not taking it.
+
+- **The wizard installs a pinned elementor-mcp release, verified against a
+  digest that ships with this kit.** `EMCP_DEFAULT_VERSION` (`v1.34.1`) and
+  `EMCP_DEFAULT_SHA256` are recorded in the setup script; the digest was
+  measured by downloading the release asset itself (1,375,675 bytes) and equals
+  the one GitHub publishes for it. The download is compared against the
+  recorded value, not against a digest fetched in the same response as the
+  URL — which is the difference between a provenance check and an integrity
+  check. `EMCP_PIN_VERSION=<tag>` selects another release and
+  `EMCP_PIN_VERSION=latest` the newest; those are checked against the digest
+  the release publishes, or `EMCP_EXPECTED_SHA256`. Moving the pin is a kit
+  release: both values change together.
+- **1.6.0's "Not changed" was wrong, and is withdrawn.** It said pinning by
+  default would strand users on whatever version the kit shipped with. It would
+  not: the plugin self-updates from GitHub Releases once installed
+  (`includes/class-updater.php`, loaded from the main plugin file, latest-release
+  strategy only), so the pin decides only what is installed *today*. What
+  `latest` bought was nothing the updater does not also do, at the cost the
+  audit named.
+- **The kit's pin never downgrades.** If a newer elementor-mcp is already
+  installed, the default run stops before downloading and names the override
+  (`EMCP_PIN_VERSION=latest`, or a tag with a digest). Nothing is chosen
+  silently.
+- **`EMCP_ALLOW_UNVERIFIED` is removed.** With a recorded digest for the
+  default, the unverified path was reachable only by pinning a release that
+  publishes no digest — and `EMCP_EXPECTED_SHA256` covers that. A zip that
+  matches nothing is not installed, full stop. **Behaviour change** for anyone
+  who set that variable: supply the digest instead.
+- The release decision is one function, `emcp_release_plan`, unit-tested through
+  the script's `--self-test-fn` hook (`tests/setup-guards.bats`).
+
+**Not changed:** `.mcp.json` still holds a reusable application password
+(mode 600, gitignored, redacted from output). That is what connects the MCP
+server; the guidance to revoke it after the build stands.
+
 ## 1.6.1 — 2026-09-15
 
 - **The environment-variable hint no longer puts the password on an `export`
