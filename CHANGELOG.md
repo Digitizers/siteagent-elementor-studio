@@ -26,8 +26,11 @@ the setup script said the plugin "self-updates from GitHub Releases", while
   does. Both the comment and `SKILL.md`'s engine note now say the precise thing.
 - `SKILL.md`, the reference's header and the comparison table name the fork release
   the installer pins (v1.34.1) instead of v1.24.0. The per-site tool counts in the
-  reference were measured on v1.24.0 and now say so — a floor for v1.34.1, with the live
-  `tools/list` as the count — and `SKILL.md`'s aside no longer quotes a stale number.
+  reference were measured on v1.24.0 with every applicable tool enabled and now say so —
+  neither a count of v1.34.1 nor a minimum for it, since the admin's per-tool toggles and
+  Low-tools mode trim the list (a fresh install has been seen with zero tools exposed);
+  the live `tools/list` is the count — and `SKILL.md`'s aside no longer quotes a stale
+  number.
 
 Documentation only; the installer's behaviour is unchanged from 1.7.0.
 

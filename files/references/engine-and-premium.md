@@ -4,12 +4,16 @@
 pins)** — Elementor 4.x-correct. It bundles the WordPress MCP Adapter, so it installs as a
 **single plugin** — no separate adapter plugin needed.
 
-Tool counts scale with the site, and the figures here were measured on **v1.24.0**: **61 /
-100 / 105** on a classic (v3) install (free / Pro / Pro + WooCommerce), and **74 / 113 /
-118** when the Elementor 4.0+ atomic engine is active (the +13 atomic tools). Releases
-since then have added tools, so read them as a floor for v1.34.1, not a count of it — the
-live `tools/list` is the count. The v1.13–v1.34 fork work adds the design-system CRUD +
-governance surface on top (see below).
+Tool counts scale with the site. The figures here were measured on **v1.24.0 with every
+applicable tool enabled**: **61 / 100 / 105** on a classic (v3) install (free / Pro / Pro +
+WooCommerce), and **74 / 113 / 118** when the Elementor 4.0+ atomic engine is active (the
++13 atomic tools). They are neither a count of v1.34.1 nor a minimum for it: releases since
+have added tools, and a site can expose far fewer — the admin's per-tool toggles
+(`elementor_mcp_disabled_tools`; a fresh install has been seen with **zero** tools exposed
+that way, `docs/LESSONS.md`) and Low-tools mode (a curated ~50-slug essentials set for
+clients with a tool cap) both trim the registered list. The live `tools/list` is the
+count; when it looks short, check those two before anything else. The v1.13–v1.34 fork
+work adds the design-system CRUD + governance surface on top (see below).
 
 ## What the fork adds over the upstream base (the reason we run it)
 
