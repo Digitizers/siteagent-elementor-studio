@@ -8,12 +8,24 @@ Tool counts scale with the site. The figures here were measured on **v1.24.0 wit
 applicable tool enabled**: **61 / 100 / 105** on a classic (v3) install (free / Pro / Pro +
 WooCommerce), and **74 / 113 / 118** when the Elementor 4.0+ atomic engine is active (the
 +13 atomic tools). They are neither a count of v1.34.1 nor a minimum for it: releases since
-have added tools, and a site can expose far fewer — the admin's per-tool toggles
-(`elementor_mcp_disabled_tools`; a fresh install has been seen with **zero** tools exposed
-that way, `docs/LESSONS.md`) and Low-tools mode (a curated ~50-slug essentials set for
-clients with a tool cap) both trim the registered list. The live `tools/list` is the
-count; when it looks short, check those two before anything else. The v1.13–v1.34 fork
-work adds the design-system CRUD + governance surface on top (see below).
+have added tools, and a site can expose far fewer — the admin's per-tool toggles and
+Low-tools mode both trim the registered list. The live `tools/list` is the count; when it
+looks short, check those two before concluding a tool does not exist:
+
+- **Per-tool toggles** live in the `elementor_mcp_disabled_tools` option, and nothing in
+  the MCP handshake, the tool list or the logs says that abilities were suppressed — a
+  fresh install has presented as **zero tools exposed** with 104 slugs in that list.
+  Diagnose: `wp option get elementor_mcp_disabled_tools --format=json`. Fix: back the list
+  up to the project, then `wp option update elementor_mcp_disabled_tools '[]' --format=json`
+  and restart Claude Code (the tool list is read at startup).
+- **Low-tools mode** (EMCP Tools → Tools screen) filters the list down to a curated
+  ~50-slug essentials set for clients with a tool cap. On such a client do **not** clear
+  the whole disabled list: the full Pro + atomic set (~113 tools) overruns a ~100 cap, the
+  client silently truncates, and the atomic essentials can be what falls off — "no tools"
+  turns into the subtler "writes don't persist".
+
+The v1.13–v1.34 fork work adds the design-system CRUD + governance surface on top (see
+below).
 
 ## What the fork adds over the upstream base (the reason we run it)
 
@@ -49,8 +61,10 @@ the main plugin file), so later releases appear on the site's normal *Plugins* /
   with no Release offers nothing), served from the Release's `elementor-mcp*.zip` asset.
 - The check contacts `api.github.com`, and the download `github.com`, with a user agent
   that names only the plugin and its version — never the site URL WordPress's default
-  agent would send. Nothing about the site leaves the site; that is the sense in which
-  "no phone-home" holds.
+  agent would send. What GitHub does receive is what any update check hands the host it
+  asks: the request's source IP, and here the plugin's name and version. What it does not
+  receive is the site URL, and there is no vendor endpoint and no telemetry of any kind —
+  that is the sense in which "no phone-home" holds.
 
 Those later updates run outside this kit's pin-and-digest check: the wizard verifies
 what it installs today, and WordPress's update flow governs what replaces it. An

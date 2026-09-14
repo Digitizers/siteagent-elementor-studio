@@ -15,8 +15,10 @@ the setup script said the plugin "self-updates from GitHub Releases", while
 - **The reference was stale.** It described fork v1.24.0; the fork gained an update
   checker in v1.28.0 (2026-08-20, `includes/class-updater.php`). It now says what the
   checker is: it **offers** published GitHub Releases on the site's normal Updates
-  screens (release-only detection, a user agent naming only the plugin — nothing about
-  the site leaves the site, which is the sense in which "no phone-home" still holds);
+  screens (release-only detection, a user agent naming only the plugin — GitHub receives
+  the source IP and the plugin version, as any update check hands its host, and not the
+  site URL; no vendor endpoint, no telemetry, which is the sense in which "no phone-home"
+  still holds);
   installing one is WordPress's ordinary update flow, and the fork does not turn on
   WordPress's per-plugin auto-update toggle. Those updates run outside this kit's
   pin-and-digest check, and the reference says so, with the operator's option
@@ -31,8 +33,9 @@ the setup script said the plugin "self-updates from GitHub Releases", while
   reference were measured on v1.24.0 with every applicable tool enabled and now say so —
   neither a count of v1.34.1 nor a minimum for it, since the admin's per-tool toggles and
   Low-tools mode trim the list (a fresh install has been seen with zero tools exposed);
-  the live `tools/list` is the count — and `SKILL.md`'s aside no longer quotes a stale
-  number.
+  the live `tools/list` is the count, and the diagnose/fix commands for both are in the
+  reference itself, since `docs/LESSONS.md` is not part of the published payload — and
+  `SKILL.md`'s aside no longer quotes a stale number.
 
 Documentation only; the installer's behaviour is unchanged from 1.7.0.
 
