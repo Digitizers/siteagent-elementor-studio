@@ -5,6 +5,21 @@ All notable changes to the siteagent-elementor-studio skill kit are documented h
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the kit is versioned via the `version:` field in `files/SKILL.md`.
 
+## 1.6.1 — 2026-09-15
+
+- **The environment-variable hint no longer puts the password on an `export`
+  line.** When the checkout uses the committed placeholder `.mcp.json`, the wizard
+  ends by printing the three variables to set, and the third was
+  `export WP_APP_PASSWORD="<the application password you entered>"` — a
+  literal to type over, which meant typing the application password into a
+  command line and so into the shell history. It now prints
+  `printf 'application password: ' && read -rs WP_APP_PASSWORD && echo && export WP_APP_PASSWORD`,
+  which prompts and reads the password without echo and leaves nothing in
+  the history. The same line was ClawHub's one static-analysis finding
+  (`exposed_secret_literal`, critical) on 1.5.0 and 1.6.0: a placeholder in a
+  password assignment reads as a hard-coded secret to a pattern scanner, and
+  the finding recurred at every release. Nothing else changed.
+
 ## 1.6.0 — 2026-09-13
 
 From the ClawHub audit of 1.5.0. ClawScan accepted one finding as material and
