@@ -94,20 +94,52 @@ jobs:
           # Collapsing both into "missing" would report "cut the release" after
           # a transient API blip, sending someone to create a release that
           # already exists.
-          ERR=$(mktemp)
-          set +e
-          DRAFT=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" \
-            --jq '.draft' 2>"$ERR")
-          RC=$?
-          set -e
-          if [ "$RC" -eq 0 ]; then
-            STATE=$DRAFT
-          elif grep -qiE '404|not found' "$ERR"; then
-            STATE=missing
-          else
-            echo "::error::Could not query releases - this is a lookup failure, not a missing release:"
-            cat "$ERR" >&2
-            exit 1
+          lookup() {
+            ERR=$(mktemp)
+            set +e
+            DRAFT=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" \
+              --jq '.draft' 2>"$ERR")
+            RC=$?
+            set -e
+            if [ "$RC" -eq 0 ]; then
+              STATE=$DRAFT
+            elif grep -qiE '404|not found' "$ERR"; then
+              STATE=missing
+            else
+              echo "::error::Could not query releases - this is a lookup failure, not a missing release:"
+              cat "$ERR" >&2
+              exit 1
+            fi
+          }
+          lookup
+          # On a push to main the release is cut AFTER the merge - seconds later
+          # when the release flow is scripted, longer by hand - and this run
+          # starts the moment the push lands. Failing on the first lookup turned
+          # every ordinary release into a red check on main's head that no later
+          # run could replace (measured: hostinger-mcp v1.2.1 was cut 19 s after
+          # the merge and the push run had already failed; wordpress-api-pro
+          # v3.9.5, 52 min after). So on push, wait for the release: up to
+          # 20 x 30 s. A bump still unreleased after ten minutes is the drift
+          # this check exists for and fails exactly as before. Schedule and
+          # dispatch runs do not wait - nothing is in flight for them.
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            for attempt in $(seq 1 20); do
+              # Wait through a DRAFT as well as a miss: a release flow that
+              # creates the release as a draft and publishes it only after its
+              # ClawHub publish succeeded (cloudways-mcp's release.yml) shows a
+              # draft for the whole publish, and a draft cut by hand before the
+              # merge is published moments after it. Both are the interval this
+              # wait is for. A draft still standing after the window fails
+              # below, as before.
+              case "$STATE" in
+                missing) what="no v$VERSION release yet" ;;
+                true)    what="v$VERSION is still a draft" ;;
+                *)       break ;;
+              esac
+              echo "$what (attempt $attempt/20) - waiting 30 s for the release flow"
+              sleep 30
+              lookup
+            done
           fi
           case "$STATE" in
             false)
