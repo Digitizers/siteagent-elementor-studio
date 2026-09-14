@@ -402,9 +402,14 @@ sha256_of(){
 # (1,375,675 bytes) and equal to the digest GitHub publishes for it. This is
 # the provenance check: the digest the download is compared against ships in
 # this kit, not in the same API response as the URL. Moving the pin is a kit
-# release; update both values together. A pinned install strands nobody: the
-# plugin self-updates from GitHub Releases once installed (its
-# includes/class-updater.php, latest-release strategy only).
+# release; update both values together. A pinned install strands nobody: since
+# fork v1.28.0 the plugin carries its own update checker
+# (includes/class-updater.php), which OFFERS later GitHub Releases on the
+# site's normal Updates screens - release-only detection, a user agent that
+# names only the plugin. Installing one is WordPress's ordinary update flow
+# (an admin's click, or WordPress's per-plugin auto-update toggle, which the
+# fork does not turn on); those updates run outside this kit's pin-and-digest
+# check. references/engine-and-premium.md says the same, at length.
 EMCP_DEFAULT_VERSION="v1.34.1"
 EMCP_DEFAULT_SHA256="3a4eab58eb4c628f7aa5783f0eb9e6fb539f730673c880cb4117420ebb5bf2ec"
 

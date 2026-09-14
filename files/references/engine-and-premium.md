@@ -30,9 +30,27 @@ The fork started from upstream's 1.x line and has diverged substantially:
 
 The vendored Freemius SDK and the upstream hosted "Pro marketplace" (Templates / Skills
 fetchers that pulled licensed content from `emcp.msrbuilds.com`) were **removed in v1.22.0**.
-The fork has **no license gate, no auto-update channel, and no phone-home** — it is
-distributed via GitHub releases (this skill's installer pins/pulls them). The **free**
-bundled sample-prompts + brand-kit apply/backup/restore are retained.
+The fork has **no license gate and no phone-home**. It is distributed via GitHub
+releases: this skill's installer installs the release it pins, and **since fork v1.28.0
+the plugin carries its own update checker** (`includes/class-updater.php`, loaded from
+the main plugin file), so later releases appear on the site's normal *Plugins* /
+*Dashboard → Updates* screens. Be precise about what that is and is not:
+
+- It **offers** updates; it does not install them. Installing one is WordPress's
+  ordinary plugin-update flow — an admin clicks *Update*, or has turned on WordPress's
+  per-plugin auto-update toggle for it. The fork does not turn that toggle on.
+- It offers a **published GitHub Release** only (release-only detection: a pushed tag
+  with no Release offers nothing), served from the Release's `elementor-mcp*.zip` asset.
+- The check contacts `api.github.com`, and the download `github.com`, with a user agent
+  that names only the plugin and its version — never the site URL WordPress's default
+  agent would send. Nothing about the site leaves the site; that is the sense in which
+  "no phone-home" holds.
+
+Those later updates run outside this kit's pin-and-digest check: the wizard verifies
+what it installs today, and WordPress's update flow governs what replaces it. An
+operator who wants every version reviewed leaves the auto-update toggle off (the
+default) and reviews the Release before clicking *Update*. The **free** bundled
+sample-prompts + brand-kit apply/backup/restore are retained.
 
 ## Do NOT run the paid "MCP Tools for Elementor (Premium)" (`emcp-pro`) at the same time
 
@@ -40,7 +58,7 @@ The fork and upstream Premium share the same code lineage (same class names
 `Elementor_MCP_*`, same `ELEMENTOR_MCP_VERSION` constant, no PHP namespace). Activating both
 = `Cannot redeclare class` fatal. **Only one can be active.**
 
-| | Upstream Premium `emcp-pro` (3.0.0) | fork `elementor-mcp` (1.24.0) |
+| | Upstream Premium `emcp-pro` (3.0.0) | fork `elementor-mcp` (1.34.1) |
 |---|---|---|
 | Elementor 4.x GA atomic engine | ❌ classic-only schema (breaks on 4.1.x) | ✅ 4.x-correct |
 | v4 design-system CRUD (classes / variables / interactions) | ❌ | ✅ |

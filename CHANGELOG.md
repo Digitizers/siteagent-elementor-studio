@@ -5,6 +5,30 @@ All notable changes to the siteagent-elementor-studio skill kit are documented h
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the kit is versioned via the `version:` field in `files/SKILL.md`.
 
+## 1.7.1 — 2026-09-15
+
+From the ClawHub audit of 1.7.0: AIG clean, static analysis clean. ClawScan's one
+remaining review concern was a **contradiction inside the kit**, and it was right:
+the setup script said the plugin "self-updates from GitHub Releases", while
+`references/engine-and-premium.md` said the fork has "no auto-update channel".
+
+- **The reference was stale.** It described fork v1.24.0; the fork gained an update
+  checker in v1.28.0 (2026-08-20, `includes/class-updater.php`). It now says what the
+  checker is: it **offers** published GitHub Releases on the site's normal Updates
+  screens (release-only detection, a user agent naming only the plugin — nothing about
+  the site leaves the site, which is the sense in which "no phone-home" still holds);
+  installing one is WordPress's ordinary update flow, and the fork does not turn on
+  WordPress's per-plugin auto-update toggle. Those updates run outside this kit's
+  pin-and-digest check, and the reference says so, with the operator's option
+  (leave the toggle off, review the Release, click *Update*).
+- **The script's wording was too strong.** "Self-updates" is what 1.7.0 wrote, in the
+  setup script's comment and in this changelog; "offers its updates" is what the code
+  does. Both the comment and `SKILL.md`'s engine note now say the precise thing.
+- `SKILL.md` and the comparison table name the fork release the installer pins
+  (v1.34.1) instead of v1.24.0.
+
+Documentation only; the installer's behaviour is unchanged from 1.7.0.
+
 ## 1.7.0 — 2026-09-15
 
 From the ClawHub audit of 1.6.1: static analysis is clean (the 1.6.1 fix), the
