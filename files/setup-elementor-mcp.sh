@@ -396,6 +396,45 @@ sha256_of(){
   fi
 }
 
+# ---- elementor-mcp release selection ----------------------------------------
+# The release the wizard installs by default, recorded here together with the
+# sha256 of its zip asset - measured by downloading the asset itself
+# (1,375,675 bytes) and equal to the digest GitHub publishes for it. This is
+# the provenance check: the digest the download is compared against ships in
+# this kit, not in the same API response as the URL. Moving the pin is a kit
+# release; update both values together. A pinned install strands nobody: the
+# plugin self-updates from GitHub Releases once installed (its
+# includes/class-updater.php, latest-release strategy only).
+EMCP_DEFAULT_VERSION="v1.34.1"
+EMCP_DEFAULT_SHA256="3a4eab58eb4c628f7aa5783f0eb9e6fb539f730673c880cb4117420ebb5bf2ec"
+
+# True (0) when dotted version $1 is strictly lower than $2.
+ver_lt() {
+  [ "$1" = "$2" ] && return 1
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$1" ]
+}
+
+# arg1: EMCP_PIN_VERSION ("" = the kit's pinned default; "latest"; or a tag)
+# arg2: EMCP_EXPECTED_SHA256 ("" = none supplied)
+# arg3: installed elementor-mcp version ("" = not installed)
+# -> three lines: the release API URL; the digest the zip must match ("" =
+#    the one the release itself publishes); a label for the log.
+# Exit 2 when the default pin would DOWNGRADE an installed newer plugin: the
+# caller names the override, nothing is chosen silently.
+emcp_release_plan(){
+  pin="${1:-}"; want="${2:-}"; have="${3:-}"
+  api="https://api.github.com/repos/Digitizers/elementor-mcp/releases"
+  case "$pin" in
+    "")
+      if [ -n "$have" ] && ver_lt "${EMCP_DEFAULT_VERSION#v}" "$have"; then return 2; fi
+      printf '%s\n%s\n%s\n' "$api/tags/$EMCP_DEFAULT_VERSION" "${want:-$EMCP_DEFAULT_SHA256}" "the kit's pinned $EMCP_DEFAULT_VERSION" ;;
+    latest)
+      printf '%s\n%s\n%s\n' "$api/latest" "$want" "the latest release (EMCP_PIN_VERSION=latest)" ;;
+    *)
+      printf '%s\n%s\n%s\n' "$api/tags/$pin" "$want" "$pin (EMCP_PIN_VERSION)" ;;
+  esac
+}
+
 # Hidden test hook: `setup-elementor-mcp.sh --self-test-fn <fn> [args...]` runs
 # one helper and exits. Never touches the network, never prompts.
 if [ "${1:-}" = "--self-test-fn" ]; then shift; fn="$1"; shift || true; "$fn" "$@"; exit $?; fi
@@ -1025,12 +1064,6 @@ if isinstance(d, list):
 ' 2>/dev/null || echo ""
 }
 
-# True (0) when dotted version $1 is strictly lower than $2.
-ver_lt() {
-  [ "$1" = "$2" ] && return 1
-  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$1" ]
-}
-
 NS_JSON=$(site_curl -s -u "$WP_USER:$WP_APP_PWD" --max-time 10 "$SITE_URL/wp-json/" || echo "{}")
 HAS_MCP=$(echo "$NS_JSON" | jq_lenient_contains '.namespaces' 'mcp' 2>/dev/null || echo "no")
 HAS_OLD_ADAPTER=$(plugin_is_installed "mcp-adapter")
@@ -1096,27 +1129,27 @@ if [ "$SKIP_MCP_INSTALL" = "no" ]; then
   WORK=$(mktemp -d)
   trap 'rm -rf "$WORK"' EXIT
 
-  # The plugin is fetched from the trusted Digitizers/elementor-mcp repo over
-  # HTTPS. By default we pull `releases/latest` (unpinned) so re-runs pick up
-  # security fixes and the auto-update floor ($REQUIRED_EMCP_VERSION) stays met.
-  # Security-conscious users can pin an exact release tag by exporting
-  # EMCP_PIN_VERSION (e.g. EMCP_PIN_VERSION=v1.10.0) before running this script.
+  # Which release, and which digest its zip must match, is one decision made
+  # by emcp_release_plan (unit-tested): by default the kit's pinned release,
+  # checked against the digest recorded beside the pin - out of band from the
+  # download, which is what makes it a provenance check. EMCP_PIN_VERSION=<tag>
+  # selects another release and EMCP_PIN_VERSION=latest the newest; those are
+  # checked against the digest the release itself publishes, which travels in
+  # the same API response as the URL and so proves integrity, not provenance -
+  # EMCP_EXPECTED_SHA256 supplies an out-of-band digest for them. A zip that
+  # matches nothing is never installed: it is about to be installed and
+  # ACTIVATED as PHP on a WordPress site.
   EMCP_PIN_VERSION="${EMCP_PIN_VERSION:-}"
-  if [ -n "$EMCP_PIN_VERSION" ]; then
-    EM_RELEASE_API="https://api.github.com/repos/Digitizers/elementor-mcp/releases/tags/${EMCP_PIN_VERSION}"
-    info "Downloading the elementor-mcp fork — pinned to ${EMCP_PIN_VERSION} (trusted Digitizers repo, HTTPS)..."
-  else
-    EM_RELEASE_API="https://api.github.com/repos/Digitizers/elementor-mcp/releases/latest"
-    info "Downloading the elementor-mcp fork (bundles the MCP Adapter, latest release from the trusted Digitizers repo over HTTPS; set EMCP_PIN_VERSION to pin a tag)..."
+  if ! EM_PLAN=$(emcp_release_plan "$EMCP_PIN_VERSION" "${EMCP_EXPECTED_SHA256:-}" "$EMCP_VER"); then
+    abort "elementor-mcp $EMCP_VER is installed and is NEWER than the release this kit pins ($EMCP_DEFAULT_VERSION).
+  Installing the pin would downgrade it, so nothing was done. Re-run with one of:
+      EMCP_PIN_VERSION=latest bash \"$SELF\"
+      EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> bash \"$SELF\""
   fi
-  # Take the asset's sha256 from the SAME API response as its URL, so a
-  # download mangled or swapped in transit (proxy, CDN, partial transfer) is
-  # caught before the zip is installed onto a WordPress site.
-  #
-  # Be clear about what this is NOT: the digest travels with the URL, so it
-  # proves integrity, not provenance. A compromised release would publish a
-  # matching digest for a malicious asset. Export EMCP_EXPECTED_SHA256 with a
-  # digest obtained out of band for a real provenance check.
+  EM_RELEASE_API=$(printf '%s\n' "$EM_PLAN" | sed -n 1p)
+  EM_EXPECTED=$(printf '%s\n' "$EM_PLAN" | sed -n 2p)
+  EM_LABEL=$(printf '%s\n' "$EM_PLAN" | sed -n 3p)
+  info "Downloading the elementor-mcp fork — $EM_LABEL (bundles the MCP Adapter; trusted Digitizers repo, HTTPS)..."
   EM_RELEASE_JSON=$(curl -s "$EM_RELEASE_API")
   EM_ZIPBALL=$(printf '%s' "$EM_RELEASE_JSON" \
     | python3 -c "$JQ_LENIENT_PY"'
@@ -1137,27 +1170,24 @@ print((a[0].get("digest") or "").replace("sha256:","") if a else "")
 
   # Verify before unzipping: the archive is about to be installed and activated
   # as PHP on a WordPress site, so a bad one must never reach the repack step.
-  EM_EXPECTED="${EMCP_EXPECTED_SHA256:-$EM_DIGEST}"
-  if [ -n "$EM_EXPECTED" ]; then
-    EM_ACTUAL=$(sha256_of "$WORK/elementor-mcp-src.zip")
-    if [ "$EM_ACTUAL" != "$EM_EXPECTED" ]; then
-      abort "elementor-mcp download failed integrity check.
+  [ -n "$EM_EXPECTED" ] || EM_EXPECTED="$EM_DIGEST"
+  if [ -z "$EM_EXPECTED" ]; then
+    abort "This release publishes no sha256 for its asset, so the download cannot be verified.
+  The archive is about to be installed and ACTIVATED as PHP on your WordPress site, so it is not installed.
+  Supply a digest obtained out of band:
+      EMCP_PIN_VERSION=$EMCP_PIN_VERSION EMCP_EXPECTED_SHA256=<digest> bash \"$SELF\""
+  fi
+  EM_ACTUAL=$(sha256_of "$WORK/elementor-mcp-src.zip")
+  if [ "$EM_ACTUAL" != "$EM_EXPECTED" ]; then
+    abort "elementor-mcp download failed integrity check.
     expected sha256: $EM_EXPECTED
     got sha256:      $EM_ACTUAL
   Nothing was installed. Re-run; if it persists, the download is being tampered with or the release was replaced."
-    fi
-    ok "Download verified (sha256 ${EM_ACTUAL:0:12}…)${EMCP_EXPECTED_SHA256:+ against EMCP_EXPECTED_SHA256}"
-  elif [ "${EMCP_ALLOW_UNVERIFIED:-0}" = "1" ]; then
-    warn "This release publishes no sha256 for its asset, and EMCP_ALLOW_UNVERIFIED=1 is set — installing an UNVERIFIED download."
-  else
-    abort "This release publishes no sha256 for its asset, so the download cannot be verified.
-  The archive is about to be installed and ACTIVATED as PHP on your WordPress site, so it is not installed.
-  Supply a digest obtained out of band — which is the stronger check anyway, since a release's own
-  digest travels in the same response as its URL:
-      EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> bash \"$SELF\"
-  Or, to accept an unverified download deliberately:
-      EMCP_ALLOW_UNVERIFIED=1 bash \"$SELF\""
   fi
+  if [ -n "${EMCP_EXPECTED_SHA256:-}" ]; then EM_HOW="EMCP_EXPECTED_SHA256"
+  elif [ -z "$EMCP_PIN_VERSION" ]; then EM_HOW="the digest recorded in this kit"
+  else EM_HOW="the digest the release publishes (integrity, not provenance)"; fi
+  ok "Download verified (sha256 ${EM_ACTUAL:0:12}…) against $EM_HOW"
 
   # Repack with clean folder name (zipballs have ugly hash-suffixed dirs)
   ( cd "$WORK" && unzip -q elementor-mcp-src.zip )

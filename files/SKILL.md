@@ -1,20 +1,20 @@
 ---
 name: siteagent-elementor-studio
-version: 1.6.1
+version: 1.7.0
 license: MIT
 description: Helps with WordPress + Elementor work via the elementor-mcp MCP server — building new pages, editing existing ones, inspecting site state, or exploring what's possible. Auto-detects Elementor Pro (native Form, Theme Builder, Loop Grid, Popups, Dynamic Tags, Sticky/Motion vs free-tier workarounds) AND the page engine (classic vs Elementor 4 atomic/V4 — atomic uses add-flexbox/add-atomic-* tools since classic writes don't persist on a V4 page). Detects ACF + Crocoblock/JetEngine for dynamic-data binding (Tier-0; bind ACF via Pro dynamic tags, place Jet widgets via add-widget with runtime-verified types). On atomic (V4) sites, authors the Elementor 4 design system — Global Classes, Variables (design tokens), and per-element Interactions — and recovers from the fork's schema-in-error and governance responses. Asks what the user wants before acting. Use when the user references the Elementor MCP, invokes `/siteagent-elementor-studio`, or runs `mcp__elementor__elementor-mcp-*` tools. Also covers initial install of the MCP Adapter + elementor-mcp plugins, app-password auth wiring, schema-loading discipline, and the widget-vs-HTML decision tree. SKIP for Bricks, Divi, Beaver Builder, or non-Elementor WordPress builds.
 permissions:
   shell: "Runs the bundled setup script (files/setup-elementor-mcp.sh) — only on explicit user confirmation. It shells out to curl/unzip/zip/python3 and, for Local sites, drives Local by Flywheel's bundled WP-CLI (plugin install/activate) against the running site's PHP + MySQL socket."
   network:
-    - "GitHub release download over HTTPS from the trusted Digitizers/elementor-mcp repo (api.github.com + release asset host) — the elementor-mcp plugin zip; unpinned (latest) by default, pin with EMCP_PIN_VERSION. The zip is checked against the sha256 the API reports for the asset before it is unpacked or installed; EMCP_EXPECTED_SHA256 supplies an out-of-band digest instead"
+    - "GitHub release download over HTTPS from the trusted Digitizers/elementor-mcp repo (api.github.com + release asset host) — the elementor-mcp plugin zip. By default the release this kit pins (EMCP_DEFAULT_VERSION in the setup script), checked before it is unpacked or installed against the sha256 recorded beside the pin — out of band from the download. EMCP_PIN_VERSION=<tag> or =latest selects another release, checked against the digest that release publishes (integrity, not provenance) or EMCP_EXPECTED_SHA256. Nothing is installed unverified"
     - "The target WordPress site's REST API (/wp-json/ — auth check, plugin list/install, MCP route verification). Plaintext http:// is refused for a non-local host unless that exact host is named in WP_ALLOW_HTTP, because the run sends a reusable application password on every request"
   filesystem:
     - "Writes .mcp.json in the current working directory, created mode 600 before the credential is written (it embeds a reusable Basic-Auth WordPress credential), and appends .mcp.json to .gitignore there"
     - "Reads Local by Flywheel site paths + bundled WP-CLI/PHP binaries; creates a temp working dir for the plugin zip"
   env:
     - "WP_URL / WP_USERNAME / WP_APP_PASSWORD (when used to supply the target site + Application Password auth)"
-    - "EMCP_PIN_VERSION (optional — pin the elementor-mcp release tag instead of latest)"
-    - "EMCP_EXPECTED_SHA256 (optional — verify the plugin zip against a digest obtained out of band, rather than the one the release API reports alongside the URL)"
+    - "EMCP_PIN_VERSION (optional — a release tag, or latest, instead of the release this kit pins; the kit's pin never downgrades an installed newer plugin — the run stops and names this override)"
+    - "EMCP_EXPECTED_SHA256 (optional — verify the plugin zip against a digest obtained out of band; required for a release that publishes no digest)"
     - "WP_ALLOW_HTTP (comma-separated host list — permits plaintext http for exactly those hosts; a blanket value is not a hostname and permits nothing)"
 ---
 
