@@ -124,8 +124,19 @@ jobs:
           # dispatch runs do not wait - nothing is in flight for them.
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             for attempt in $(seq 1 20); do
-              [ "$STATE" = missing ] || break
-              echo "no v$VERSION release yet (attempt $attempt/20) - waiting 30 s for the release flow"
+              # Wait through a DRAFT as well as a miss: a release flow that
+              # creates the release as a draft and publishes it only after its
+              # ClawHub publish succeeded (cloudways-mcp's release.yml) shows a
+              # draft for the whole publish, and a draft cut by hand before the
+              # merge is published moments after it. Both are the interval this
+              # wait is for. A draft still standing after the window fails
+              # below, as before.
+              case "$STATE" in
+                missing) what="no v$VERSION release yet" ;;
+                true)    what="v$VERSION is still a draft" ;;
+                *)       break ;;
+              esac
+              echo "$what (attempt $attempt/20) - waiting 30 s for the release flow"
               sleep 30
               lookup
             done

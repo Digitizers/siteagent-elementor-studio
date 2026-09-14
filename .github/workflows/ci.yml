@@ -23,8 +23,12 @@ jobs:
           skill_v=$(grep -m1 '^version:' "$SKILL" | sed 's/^version:[[:space:]]*//' | tr -d '"' | tr -d "'" | xargs)
           [ -n "$skill_v" ] || { echo "::error::no version: in $SKILL"; exit 1; }
           mismatch=0
-          # Color-agnostic: match the semver itself, not the badge color suffix.
-          badge_v=$(grep -oE 'badge/version-[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed 's|badge/version-||' || true)
+          # Color-agnostic, and the WHOLE semver: shields.io writes a dash inside
+          # the value as "--" (version-1.2.0--rc.1-blue renders "1.2.0-rc.1",
+          # measured), so take every "--" segment after the core and fold it
+          # back. A prerelease is a legitimate version here - release-drift.yml
+          # accepts one - and the check must not reject a consistent bump to it.
+          badge_v=$(grep -oE 'badge/version-[0-9]+\.[0-9]+\.[0-9]+(--[0-9A-Za-z.+]+)*' README.md | head -1 | sed 's|badge/version-||; s|--|-|g' || true)
           [ "$badge_v" = "$skill_v" ] || { echo "::error::README badge says ${badge_v:-<none>}, $SKILL says $skill_v"; mismatch=1; }
           pkg_v=""
           if [ -f package.json ]; then
@@ -32,7 +36,7 @@ jobs:
             [ "$pkg_v" = "$skill_v" ] || { echo "::error::package.json says $pkg_v, $SKILL says $skill_v"; mismatch=1; }
           fi
           # Every "Current version: **x.y.z**" line in the README, if any.
-          for v in $(grep -oE 'Current version: \*\*[0-9]+\.[0-9]+\.[0-9]+\*\*' README.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true); do
+          for v in $(grep -oE 'Current version: \*\*[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*\*\*' README.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*' || true); do
             [ "$v" = "$skill_v" ] || { echo "::error::README 'Current version' says $v, $SKILL says $skill_v"; mismatch=1; }
           done
           [ "$mismatch" = 0 ] || { echo "::error::bump every declaration in the same commit"; exit 1; }
