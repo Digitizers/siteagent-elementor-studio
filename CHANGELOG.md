@@ -5,6 +5,42 @@ All notable changes to the siteagent-elementor-studio skill kit are documented h
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/),
 and the kit is versioned via the `version:` field in `files/SKILL.md`.
 
+## 1.7.1 — 2026-09-15
+
+From the ClawHub audit of 1.7.0: AIG clean, static analysis clean. ClawScan's one
+remaining review concern was a **contradiction inside the kit**, and it was right:
+the setup script said the plugin "self-updates from GitHub Releases", while
+`references/engine-and-premium.md` said the fork has "no auto-update channel".
+
+- **The reference was stale.** It described fork v1.24.0; the fork gained an update
+  checker in v1.28.0 (2026-08-20, `includes/class-updater.php`). It now says what the
+  checker is: it **offers** published GitHub Releases on the site's normal Updates
+  screens (release-only detection, a user agent naming only the plugin — GitHub receives
+  the source IP and the plugin version, as any update check hands its host, and not the
+  site URL; no vendor endpoint, no telemetry, which is the sense in which "no phone-home"
+  still holds);
+  installing one is WordPress's ordinary update flow, and the fork does not turn on
+  WordPress's per-plugin auto-update toggle. Those updates run outside this kit's
+  pin-and-digest check, and the reference says so, with the operator's option
+  (leave the toggle off, review the Release, click *Update*).
+- **The script's wording was too strong.** "Self-updates" and "a pinned install strands
+  nobody" are what 1.7.0 wrote, in the setup script's comment and in this changelog;
+  "offers its updates" is what the code does, and a site nobody updates stays on the pin
+  — by design, not by accident. Both the comment and `SKILL.md`'s engine note now say the
+  precise thing.
+- `SKILL.md`, the reference's header and the comparison table name the fork release
+  the installer pins (v1.34.1) instead of v1.24.0. The per-site tool counts in the
+  reference were measured on v1.24.0 with every applicable tool enabled and now say so —
+  neither a count of v1.34.1 nor a minimum for it, since the admin's per-tool toggles and
+  Low-tools mode trim the list (a fresh install has been seen with zero tools exposed);
+  the live `tools/list` is the count, and the diagnose/fix sequence for both is in the
+  reference itself, since `docs/LESSONS.md` is not part of the published payload —
+  including the order that makes a cleared list stick (let the defaults seeder run and
+  bump `elementor_mcp_defaults_applied` first, then clear) — and
+  `SKILL.md`'s aside no longer quotes a stale number.
+
+Documentation only; the installer's behaviour is unchanged from 1.7.0.
+
 ## 1.7.0 — 2026-09-15
 
 From the ClawHub audit of 1.6.1: static analysis is clean (the 1.6.1 fix), the
