@@ -21,9 +21,11 @@ the setup script said the plugin "self-updates from GitHub Releases", while
   WordPress's per-plugin auto-update toggle. Those updates run outside this kit's
   pin-and-digest check, and the reference says so, with the operator's option
   (leave the toggle off, review the Release, click *Update*).
-- **The script's wording was too strong.** "Self-updates" is what 1.7.0 wrote, in the
-  setup script's comment and in this changelog; "offers its updates" is what the code
-  does. Both the comment and `SKILL.md`'s engine note now say the precise thing.
+- **The script's wording was too strong.** "Self-updates" and "a pinned install strands
+  nobody" are what 1.7.0 wrote, in the setup script's comment and in this changelog;
+  "offers its updates" is what the code does, and a site nobody updates stays on the pin
+  — by design, not by accident. Both the comment and `SKILL.md`'s engine note now say the
+  precise thing.
 - `SKILL.md`, the reference's header and the comparison table name the fork release
   the installer pins (v1.34.1) instead of v1.24.0. The per-site tool counts in the
   reference were measured on v1.24.0 with every applicable tool enabled and now say so —
