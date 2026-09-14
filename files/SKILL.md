@@ -464,7 +464,7 @@ Format the response as a clear summary, not a JSON dump. The user wants understa
 
 ## When the user asks to EXPLORE / "what can you do?"
 
-Give a short menu *(don't dump all 75 tools)*. Point them at the four modes from the First Action Protocol with concrete examples:
+Give a short menu *(don't dump the whole tool list)*. Point them at the four modes from the First Action Protocol with concrete examples:
 
 - *"Build a homepage from this HTML mockup"* → mode 1
 - *"Make the hero text 20% smaller"* → mode 2

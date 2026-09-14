@@ -1,13 +1,15 @@
 # Engine & the Premium plugin — what runs the build
 
-**Engine = our fork `Digitizers/elementor-mcp` (v1.24.0)** — **up to 118** MCP tools,
-Elementor 4.x-correct. It bundles the WordPress MCP Adapter, so it installs as a **single
-plugin** — no separate adapter plugin needed.
+**Engine = our fork `Digitizers/elementor-mcp` (v1.34.1, the release this kit's installer
+pins)** — Elementor 4.x-correct. It bundles the WordPress MCP Adapter, so it installs as a
+**single plugin** — no separate adapter plugin needed.
 
-Tool counts scale with the site: **61 / 100 / 105** on a classic (v3) install
-(free / Pro / Pro + WooCommerce), and **74 / 113 / 118** when the Elementor 4.0+ atomic
-engine is active (the +13 atomic tools). The v1.13–v1.24 fork work adds the design-system
-CRUD + governance surface on top (see below).
+Tool counts scale with the site, and the figures here were measured on **v1.24.0**: **61 /
+100 / 105** on a classic (v3) install (free / Pro / Pro + WooCommerce), and **74 / 113 /
+118** when the Elementor 4.0+ atomic engine is active (the +13 atomic tools). Releases
+since then have added tools, so read them as a floor for v1.34.1, not a count of it — the
+live `tools/list` is the count. The v1.13–v1.34 fork work adds the design-system CRUD +
+governance surface on top (see below).
 
 ## What the fork adds over the upstream base (the reason we run it)
 

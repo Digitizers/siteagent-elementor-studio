@@ -24,8 +24,10 @@ the setup script said the plugin "self-updates from GitHub Releases", while
 - **The script's wording was too strong.** "Self-updates" is what 1.7.0 wrote, in the
   setup script's comment and in this changelog; "offers its updates" is what the code
   does. Both the comment and `SKILL.md`'s engine note now say the precise thing.
-- `SKILL.md` and the comparison table name the fork release the installer pins
-  (v1.34.1) instead of v1.24.0.
+- `SKILL.md`, the reference's header and the comparison table name the fork release
+  the installer pins (v1.34.1) instead of v1.24.0. The per-site tool counts in the
+  reference were measured on v1.24.0 and now say so — a floor for v1.34.1, with the live
+  `tools/list` as the count — and `SKILL.md`'s aside no longer quotes a stale number.
 
 Documentation only; the installer's behaviour is unchanged from 1.7.0.
 
