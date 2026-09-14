@@ -15,9 +15,16 @@ looks short, check those two before concluding a tool does not exist:
 - **Per-tool toggles** live in the `elementor_mcp_disabled_tools` option, and nothing in
   the MCP handshake, the tool list or the logs says that abilities were suppressed — a
   fresh install has presented as **zero tools exposed** with 104 slugs in that list.
-  Diagnose: `wp option get elementor_mcp_disabled_tools --format=json`. Fix: back the list
-  up to the project, then `wp option update elementor_mcp_disabled_tools '[]' --format=json`
-  and restart Claude Code (the tool list is read at startup).
+  Diagnose: `wp option get elementor_mcp_disabled_tools --format=json`. **Clearing it alone
+  does not stick**: a seeder in the plugin's admin re-disables every Pro-badged tool
+  whenever `elementor_mcp_defaults_applied` is below its `DEFAULTS_VERSION` — deliberately,
+  so new Pro batches ship off by default — and after a plugin upgrade the counter is behind
+  again, so a list emptied while the seeder is armed is silently refilled on the next
+  wp-admin request. The order is: (1) load any wp-admin page once — that request runs the
+  seeder and bumps the counter; (2) confirm `wp option get elementor_mcp_defaults_applied`
+  now matches `DEFAULTS_VERSION`; (3) back the list up to the project, then
+  `wp option update elementor_mcp_disabled_tools '[]' --format=json` (or curate it — see the
+  next point); (4) restart Claude Code, since the tool list is read at startup.
 - **Low-tools mode** (EMCP Tools → Tools screen) filters the list down to a curated
   ~50-slug essentials set for clients with a tool cap. On such a client do **not** clear
   the whole disabled list: the full Pro + atomic set (~113 tools) overruns a ~100 cap, the

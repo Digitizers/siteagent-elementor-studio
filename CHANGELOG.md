@@ -33,8 +33,10 @@ the setup script said the plugin "self-updates from GitHub Releases", while
   reference were measured on v1.24.0 with every applicable tool enabled and now say so —
   neither a count of v1.34.1 nor a minimum for it, since the admin's per-tool toggles and
   Low-tools mode trim the list (a fresh install has been seen with zero tools exposed);
-  the live `tools/list` is the count, and the diagnose/fix commands for both are in the
-  reference itself, since `docs/LESSONS.md` is not part of the published payload — and
+  the live `tools/list` is the count, and the diagnose/fix sequence for both is in the
+  reference itself, since `docs/LESSONS.md` is not part of the published payload —
+  including the order that makes a cleared list stick (let the defaults seeder run and
+  bump `elementor_mcp_defaults_applied` first, then clear) — and
   `SKILL.md`'s aside no longer quotes a stale number.
 
 Documentation only; the installer's behaviour is unchanged from 1.7.0.
