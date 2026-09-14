@@ -408,10 +408,25 @@ sha256_of(){
 EMCP_DEFAULT_VERSION="v1.34.1"
 EMCP_DEFAULT_SHA256="3a4eab58eb4c628f7aa5783f0eb9e6fb539f730673c880cb4117420ebb5bf2ec"
 
-# True (0) when dotted version $1 is strictly lower than $2.
+# True (0) when version $1 is strictly lower than $2. Semver ordering as far
+# as a plugin header needs: the x.y.z core numerically; build metadata
+# ("+build.7") ignored; on a tied core a prerelease ("1.34.1-rc.1") is LOWER
+# than the release ("1.34.1"), so replacing it with the stable pin is an
+# upgrade, not the downgrade the plain field sort called it. Two prereleases
+# of the same core compare as strings (rc.1 < rc.2; rc.10 vs rc.9 is beyond
+# what this kit has ever needed).
 ver_lt() {
-  [ "$1" = "$2" ] && return 1
-  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$1" ]
+  a=${1%%+*}; b=${2%%+*}
+  [ "$a" = "$b" ] && return 1
+  a_core=${a%%-*}; b_core=${b%%-*}
+  a_pre=${a#"$a_core"}; b_pre=${b#"$b_core"}
+  if [ "$a_core" != "$b_core" ]; then
+    [ "$(printf '%s\n%s\n' "$a_core" "$b_core" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$a_core" ]
+    return
+  fi
+  [ -n "$a_pre" ] && [ -z "$b_pre" ] && return 0
+  [ -z "$a_pre" ] && [ -n "$b_pre" ] && return 1
+  [ "$(printf '%s\n%s\n' "$a_pre" "$b_pre" | sort | head -1)" = "$a_pre" ]
 }
 
 # arg1: EMCP_PIN_VERSION ("" = the kit's pinned default; "latest"; or a tag)
@@ -1125,11 +1140,7 @@ EOF
   fi
 fi
 
-if [ "$SKIP_MCP_INSTALL" = "no" ]; then
-  WORK=$(mktemp -d)
-  trap 'rm -rf "$WORK"' EXIT
-
-  # Which release, and which digest its zip must match, is one decision made
+# Which release, and which digest its zip must match, is one decision made
   # by emcp_release_plan (unit-tested): by default the kit's pinned release,
   # checked against the digest recorded beside the pin - out of band from the
   # download, which is what makes it a provenance check. EMCP_PIN_VERSION=<tag>
@@ -1139,13 +1150,35 @@ if [ "$SKIP_MCP_INSTALL" = "no" ]; then
   # EMCP_EXPECTED_SHA256 supplies an out-of-band digest for them. A zip that
   # matches nothing is never installed: it is about to be installed and
   # ACTIVATED as PHP on a WordPress site.
-  EMCP_PIN_VERSION="${EMCP_PIN_VERSION:-}"
+  #
+  # Decided here, before the download block, and a refused downgrade has two
+  # outcomes. The upgrade flow above may already have removed the standalone
+  # adapter by now - when the installed fork is NEWER than the pin and is
+  # serving the MCP route, that fork (which bundles the adapter) is the right
+  # thing to keep, so nothing is downloaded and the run goes on to verify it.
+  # When no fork is serving the route, nothing above has touched the site
+  # (the removal lives in the "namespace present" branch), so stopping and
+  # naming the override is both safe and true.
+EMCP_PIN_VERSION="${EMCP_PIN_VERSION:-}"
+EM_PLAN=""
+if [ "$SKIP_MCP_INSTALL" = "no" ]; then
   if ! EM_PLAN=$(emcp_release_plan "$EMCP_PIN_VERSION" "${EMCP_EXPECTED_SHA256:-}" "$EMCP_VER"); then
-    abort "elementor-mcp $EMCP_VER is installed and is NEWER than the release this kit pins ($EMCP_DEFAULT_VERSION).
-  Installing the pin would downgrade it, so nothing was done. Re-run with one of:
+    if [ "$HAS_MCP" = "yes" ]; then
+      ok "elementor-mcp $EMCP_VER is installed, serving the MCP route, and newer than the release this kit pins ($EMCP_DEFAULT_VERSION) — keeping it; nothing downloaded."
+      SKIP_MCP_INSTALL="yes"
+    else
+      abort "elementor-mcp $EMCP_VER is installed and is NEWER than the release this kit pins ($EMCP_DEFAULT_VERSION),
+  but the MCP route is not up. Installing the pin would downgrade it, so nothing was done. Re-run with one of:
       EMCP_PIN_VERSION=latest bash \"$SELF\"
       EMCP_PIN_VERSION=<tag> EMCP_EXPECTED_SHA256=<digest> bash \"$SELF\""
+    fi
   fi
+fi
+
+if [ "$SKIP_MCP_INSTALL" = "no" ]; then
+  WORK=$(mktemp -d)
+  trap 'rm -rf "$WORK"' EXIT
+
   EM_RELEASE_API=$(printf '%s\n' "$EM_PLAN" | sed -n 1p)
   EM_EXPECTED=$(printf '%s\n' "$EM_PLAN" | sed -n 2p)
   EM_LABEL=$(printf '%s\n' "$EM_PLAN" | sed -n 3p)

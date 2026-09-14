@@ -611,10 +611,43 @@ HOSTS
   [ "$status" -eq 0 ]
 }
 
-@test "a downgrade refusal names the override and installs nothing" {
-  run bash -c "sed -n '/NEWER than the release this kit pins/,/^  fi/p' '$SCRIPT'"
+@test "a refused downgrade keeps a newer fork that serves the route, and stops only when none does" {
+  run bash -c "sed -n '/^if \[ \"\$SKIP_MCP_INSTALL\" = \"no\" \]; then/,/^fi/p' '$SCRIPT' | head -20"
+  [[ "$output" == *'emcp_release_plan'* ]]
+  [[ "$output" == *'"$HAS_MCP" = "yes"'* ]]
+  [[ "$output" == *'keeping it'* ]]
+  [[ "$output" == *'SKIP_MCP_INSTALL="yes"'* ]]
   [[ "$output" == *"abort"* ]]
   [[ "$output" == *"EMCP_PIN_VERSION=latest"* ]]
+  # the plan is decided before the download block creates its work dir
+  plan=$(grep -n 'EM_PLAN=\$(emcp_release_plan' "$SCRIPT" | head -1 | cut -d: -f1)
+  work=$(grep -n 'WORK=\$(mktemp -d)' "$SCRIPT" | head -1 | cut -d: -f1)
+  [ "$plan" -lt "$work" ]
+}
+
+# ---- ver_lt: semver order, as far as a plugin header needs -------------------
+@test "ver_lt orders numerically, not lexically" {
+  fn ver_lt 1.9.0 1.10.0;   [ "$status" -eq 0 ]
+  fn ver_lt 1.10.0 1.9.0;   [ "$status" -eq 1 ]
+  fn ver_lt 1.34.1 1.34.1;  [ "$status" -eq 1 ]
+}
+
+@test "a prerelease is lower than the release of the same core" {
+  fn ver_lt 1.34.1-rc.1 1.34.1; [ "$status" -eq 0 ]
+  fn ver_lt 1.34.1 1.34.1-rc.1; [ "$status" -eq 1 ]
+  fn ver_lt 1.34.1-rc.1 1.34.1-rc.2; [ "$status" -eq 0 ]
+  fn ver_lt 1.34.0 1.34.1-rc.1; [ "$status" -eq 0 ]
+}
+
+@test "build metadata does not order" {
+  fn ver_lt 1.34.1+build.7 1.34.1; [ "$status" -eq 1 ]
+  fn ver_lt 1.34.1 1.34.1+build.7; [ "$status" -eq 1 ]
+}
+
+@test "replacing an installed prerelease of the pin with the pin is not a downgrade" {
+  pin=$(grep -m1 '^EMCP_DEFAULT_VERSION=' "$SCRIPT" | cut -d'"' -f2)
+  fn emcp_release_plan "" "" "${pin#v}-rc.1"
+  [ "$status" -eq 0 ]
 }
 
 @test "no unverified install path remains" {
