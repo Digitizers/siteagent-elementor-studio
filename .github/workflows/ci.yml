@@ -5,6 +5,12 @@ on:
     branches: [ main ]
   pull_request:
 
+# CI only reads the checkout; without this the GITHUB_TOKEN gets the repo
+# default (CodeQL actions/missing-workflow-permissions). Jobs that need more
+# set their own block.
+permissions:
+  contents: read
+
 jobs:
   versions:
     name: Version declarations agree
@@ -52,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: shellcheck
-        uses: ludeeus/action-shellcheck@master
+        uses: ludeeus/action-shellcheck@00b27aa7cb85167568cb48a3838b75f4265f2bca # master, 2026-10-27
         with:
           severity: warning
           scandir: '.'
